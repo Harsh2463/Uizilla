@@ -203,42 +203,6 @@ const shortestSteps = (from, to, n) => {
   return mod(to - from + half, n) - half;
 };
 
-/** Assigns each look a fixed display number, 1 at whichever one starts
- * active. The two rings nearest the edge (the ones a glance reads as
- * "about to disappear") swap numbers with each other — so the one that's
- * actually still fairly readable (one ring in from the very edge) carries
- * the *lower* of the pair, and the almost-gone one at the true edge carries
- * the number that would otherwise have read as "next in line". That's the
- * one pairing where turning the ring one step shouldn't look like a number
- * sliding into view — the edge card is already faded near to nothing, so
- * swapping which of the two numbers sits there means the number due to
- * arrive next is already the one barely-visible at the edge, not a fresh
- * one popping in from off-stage. Only ever computed once, from the fixed
- * starting index — like `numberOf`, it never reshuffles as the active one
- * changes. */
-const buildNumbering = (n, startActive, rings) => {
-  const nums = new Array(n).fill(0);
-  if (n <= 0) return nums;
-  nums[startActive] = 1;
-  const swapDist = (d) => (d === rings ? rings - 1 : d === rings - 1 ? rings : d);
-  const farSlot = 2 * rings + 2;
-  const hidden = [];
-  for (let d = 1; d <= Math.floor(n / 2); d++) {
-    const ri = mod(startActive + d, n);
-    const li = mod(startActive - d, n);
-    if (d <= rings && rings > 1) {
-      if (nums[ri] === 0) nums[ri] = 1 + swapDist(d);
-      if (li !== ri && nums[li] === 0) nums[li] = farSlot - swapDist(d);
-    } else {
-      if (nums[ri] === 0) hidden.push(ri);
-      if (li !== ri && nums[li] === 0) hidden.push(li);
-    }
-  }
-  let next = rings > 1 ? farSlot : 2;
-  for (const idx of hidden) nums[idx] = next++;
-  return nums;
-};
-
 // How far out a card sits, as a share of the furthest it ever travels, for
 // a ring distance `at` (0..`rings`, already clamped and unsigned) — one ring
 // out stays well inward (a gap before the far cluster), two rings out lands
@@ -501,21 +465,6 @@ export default function TryTheLook({
 
   const isControlled = controlledIndex != null;
   const startActive = clamp(defaultActiveIndex ?? Math.min(4, n - 1), 0, Math.max(0, n - 1));
-  // The number shown under each look is relative to whichever one starts in
-  // focus, not raw array order — that one reads "01", counting on to its
-  // right and wrapping back round through the left side last, with the two
-  // outermost rings swapped (see `buildNumbering`) — fixed from the start
-  // rather than shuffling every time the active one changes.
-  const numberingRings = Math.max(1, Math.min(FALLOFF_RINGS, Math.floor(n / 2) || 1));
-  const numberingRef = useRef();
-  if (
-    !numberingRef.current ||
-    numberingRef.current.n !== n ||
-    numberingRef.current.startActive !== startActive
-  ) {
-    numberingRef.current = { n, startActive, nums: buildNumbering(n, startActive, numberingRings) };
-  }
-  const numberOf = (i) => (numberingRef.current.nums[i] ?? i + 1).toString().padStart(2, "0");
   // `activeState` is a normal React value — read for the sidebar, the nav
   // and which card is "active" — and only ever changes once per click, so it
   // re-renders cheaply. The ring's actual turn, in degrees, lives outside
@@ -526,6 +475,11 @@ export default function TryTheLook({
   // drift out of step with itself and flicker. A short turn and a long one
   // now run the exact same way, just for proportionally longer.
   const [activeState, setActiveState] = useState(startActive);
+  // The number under each look is constant — 01 at whichever one starts
+  // active, counting up in plain increasing order to its right and
+  // wrapping back round through the rest last — fixed once at the start,
+  // never recomputed as the active one changes.
+  const numberOf = (i) => (mod(i - startActive, n) + 1).toString().padStart(2, "0");
   const activeRef = useRef(startActive);
   const rotYRef = useRef(-startActive * stepAngle);
   // The turn in flight, if any: eases rotYRef from `from` to `to` over
@@ -796,6 +750,34 @@ export default function TryTheLook({
                       pointerEvents: "none",
                     }}
                   />
+                  {/* Same number the bottom nav shows for this look — a plain
+                      child of the card, so it fades/blurs with it for free
+                      (the card's own opacity/filter, set above, already
+                      covers its whole subtree); no separate ref needed. */}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      top: 6,
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      width: 26,
+                      height: 26,
+                      borderRadius: "50%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.02em",
+                      color: isActive ? "#fff" : color,
+                      background: isActive ? accent : "rgba(255,255,255,0.7)",
+                      border: isActive ? "none" : "1px solid rgba(0,0,0,0.12)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {numberOf(i).replace(/^0/, "")}
+                  </span>
                   {/* Always mounted, never conditional on `isActive` — that flips
                       the instant a card is clicked, long before it's visually
                       arrived at centre. Its opacity is set continuously by
