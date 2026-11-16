@@ -9,7 +9,7 @@ export default {
   source,
   Component: TryTheLook,
   description:
-    "A round-carousel style row of looks: one character is sharp and centred, the rest blur and fade with distance. Click one to bring it into focus and swap the side panel to that look's pieces and bundle price.",
+    "A round-carousel style row of looks: one character is sharp and centred, the rest blur and fade with distance. Click one to bring it into focus and swap the side panel to that look's pieces and bundle price. Add as many looks as you like — the row always shows the same few at a time.",
   render: () => <TryTheLook />,
   usage: `import TryTheLook from "./TryTheLook";
 
@@ -39,7 +39,7 @@ const looks = [
     { key: "heading", label: "Heading", type: "text", default: "Try the Look." },
     {
       key: "subheading", label: "Subheading", type: "text",
-      default: "Six looks, styled head to toe. Tap a pin to see the piece.",
+      default: "Nine looks, styled head to toe. Tap a pin to see the piece.",
     },
     {
       key: "characterImage", label: "Character Image", type: "text",
@@ -60,11 +60,11 @@ const looks = [
     { key: "accent", label: "Accent / Button", type: "color", default: "#111111" },
   ],
   props: [
-    ["looks", "{ label, image?, pieces: Piece[] }[]", "6 sample looks", "Each piece: { brand, name, price, color? }. `image` falls back to `characterImage`."],
-    ["characterImage", "string", "model-3-640.webp demo photo", "Shared photo used for any look without its own `image`."],
+    ["looks", "{ label, image?, pieces: Piece[] }[]", "9 sample looks, each its own photo", "Each piece: { brand, name, price, color? }. `image` falls back to `characterImage` if a look doesn't have one. Grows to any length without changing how many cards read as \"in view\" at once."],
+    ["characterImage", "string", "model-3-640.webp demo photo", "Fallback photo for any look without its own `image`."],
     ["defaultActiveIndex", "number", "min(4, looks.length - 1)", "Which look starts in focus, when `activeIndex` is not supplied."],
     ["activeIndex", "number", "undefined", "Controls the focused look from outside. Omit to let the component manage it."],
-    ["heading / subheading", "string", '"Try the Look." / "Six looks…"', "Title copy above the carousel."],
+    ["heading / subheading", "string", '"Try the Look." / "Nine looks…"', "Title copy above the carousel."],
     ["bundleLabel", "string", '"Complete the look"', "Label above the bundle price."],
     ["bundleDiscount", "number", "0.1", "Share knocked off the bundle total (0–1)."],
     ["addToBagLabel", "string", '"Add full look to bag"', "Text on the main button."],

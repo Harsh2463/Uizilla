@@ -33,10 +33,12 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
  *
  * Each entry of `looks` is:
  *   { label, image?, pieces: [{ brand, name, price, color? }] }
- * `image` falls back to `characterImage` (every look can share one photo —
- * handy before you have a shot per look). `pieces` have no product image of
+ * `image` is that look's own photo; it falls back to `characterImage` for
+ * any look that doesn't have one yet. `pieces` have no product image of
  * their own yet, so each is drawn as a plain swatch carrying its `color` and
- * its name/brand as text.
+ * its name/brand as text. `looks` can grow to any length — adding more never
+ * changes how many read as "in view" at once (see `FALLOFF_RINGS`), it only
+ * gives the carousel more to turn through.
  */
 
 /* ---------------------------------------------------------------- constants */
@@ -63,6 +65,12 @@ const MIN_OPACITY = 0.04;
  * "near and clear" → "further and blurred" → "a ghost", rather than an even
  * gradient from the first step onward. */
 const FALLOFF_EASE = 0.72;
+/** How many rings out a card fades to fully blurred and barely-there by —
+ * fixed, in ring counts rather than degrees, so the composition looks
+ * exactly the same (same few in clear view, same two fully blurred at the
+ * edges) whether there are 6 looks or 60. Adding more looks only gives the
+ * carousel more to cycle through, never a more crowded row. */
+const FALLOFF_RINGS = 3;
 /** How sharply the mirrored "far edge" echo (the card most turned away)
  * fades in — only the card nearest the back ever shows it, never one that is
  * still only a step or two out, so just 4 cards read as clearly in view. */
@@ -90,9 +98,14 @@ const EASE = (t) => 1 - Math.pow(1 - t, 3);
 
 const SWATCH_COLORS = ["#D9CDBF", "#1A1A1C", "#9AA3AD", "#6B5B4D", "#3C4654", "#B8471F"];
 
+const MODEL = (n) => `https://reel-ref-try-the-look.vercel.app/assets/model-${n}-640.webp`;
+
+// Nine sample looks, each its own photo — proof that adding more only gives
+// the carousel more to cycle through; the row itself never gets busier.
 export const DEFAULT_LOOKS = [
   {
     label: "Street",
+    image: MODEL(1),
     pieces: [
       { brand: "Nike", name: "Oversized Hoodie", price: 118, color: "#3F4A3A" },
       { brand: "Nikey", name: "Baggy Denim", price: 96, color: "#8CA0C4" },
@@ -101,6 +114,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Off Duty",
+    image: MODEL(2),
     pieces: [
       { brand: "Nike", name: "Boxy Tee", price: 59, color: "#16181B" },
       { brand: "Nikey", name: "Relaxed Jeans", price: 92, color: "#A9C2D9" },
@@ -109,6 +123,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Game Day",
+    image: MODEL(3),
     pieces: [
       { brand: "Nike", name: "Varsity Jacket", price: 168, color: "#8A8F99" },
       { brand: "Nikey", name: "Track Pant", price: 84, color: "#1F2327" },
@@ -117,6 +132,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Weekend",
+    image: MODEL(4),
     pieces: [
       { brand: "Nike", name: "Half Zip Pullover", price: 110, color: "#6F7A82" },
       { brand: "Nikey", name: "Wide Chino", price: 88, color: "#C8BBA0" },
@@ -125,6 +141,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Studio Day",
+    image: MODEL(5),
     pieces: [
       { brand: "Nike", name: "Sweatshirt", price: 199, color: "#D9CDBF" },
       { brand: "Nikey", name: "Tatum 5 Orbit", price: 149, color: "#1A1A1C" },
@@ -133,10 +150,38 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Night Out",
+    image: MODEL(6),
     pieces: [
       { brand: "Nike", name: "Tech Fleece Jacket", price: 185, color: "#15171A" },
       { brand: "Nikey", name: "Slim Joggers", price: 95, color: "#2E323A" },
       { brand: "Nike", name: "High Top Sneaker", price: 155, color: "#B8471F" },
+    ],
+  },
+  {
+    label: "City Walk",
+    image: MODEL(7),
+    pieces: [
+      { brand: "Nike", name: "Utility Vest", price: 128, color: "#5B6350" },
+      { brand: "Nikey", name: "Cargo Pant", price: 98, color: "#8A7B63" },
+      { brand: "Nike", name: "Trail Runner", price: 142, color: "#3E4A5C" },
+    ],
+  },
+  {
+    label: "Date Night",
+    image: MODEL(8),
+    pieces: [
+      { brand: "Nike", name: "Knit Polo", price: 88, color: "#2B2420" },
+      { brand: "Nikey", name: "Tailored Trouser", price: 112, color: "#3A3F46" },
+      { brand: "Nike", name: "Leather Loafer", price: 165, color: "#4A2E22" },
+    ],
+  },
+  {
+    label: "Travel Day",
+    image: MODEL(9),
+    pieces: [
+      { brand: "Nike", name: "Packable Jacket", price: 135, color: "#4C5A63" },
+      { brand: "Nikey", name: "Tech Jogger", price: 90, color: "#2E2E2E" },
+      { brand: "Nike", name: "Slip-On Sneaker", price: 120, color: "#D8D2C4" },
     ],
   },
 ];
@@ -154,15 +199,15 @@ const shortestSteps = (from, to, n) => {
   return mod(to - from + half, n) - half;
 };
 
-// How far out a card sits, as a share of the furthest it ever travels — one
-// step out stays well inward (a gap before the far cluster), two steps out
-// lands almost at the very edge. `t` is the angle wrapped into (-1,1].
-const shapeT = (t) => {
-  const at = Math.abs(t);
-  const near = at <= 1 / 3 ? (NEAR_FRACTION / (1 / 3)) * at
-    : at <= 2 / 3 ? NEAR_FRACTION + (FAR_FRACTION - NEAR_FRACTION) * ((at - 1 / 3) / (1 / 3))
-    : FAR_FRACTION + (1 - FAR_FRACTION) * ((at - 2 / 3) / (1 / 3));
-  return Math.sign(t) * near;
+// How far out a card sits, as a share of the furthest it ever travels, for
+// a ring distance `at` (0..`rings`, already clamped and unsigned) — one ring
+// out stays well inward (a gap before the far cluster), two rings out lands
+// almost at the very edge.
+const shapeByRing = (at, rings) => {
+  const t = at / rings;
+  return t <= 1 / 3 ? (NEAR_FRACTION / (1 / 3)) * t
+    : t <= 2 / 3 ? NEAR_FRACTION + (FAR_FRACTION - NEAR_FRACTION) * ((t - 1 / 3) / (1 / 3))
+    : FAR_FRACTION + (1 - FAR_FRACTION) * ((t - 2 / 3) / (1 / 3));
 };
 
 /**
@@ -171,6 +216,11 @@ const shapeT = (t) => {
  * ring's current, continuously-eased angle — never left for CSS to tween
  * between two computed snapshots — so a long turn follows exactly the same
  * curve a short one does, just for longer, with no seam to catch it out.
+ *
+ * Every shape here is driven by ring distance (how many looks away a card
+ * is), not degrees — so it looks the same whether the ring holds 6 looks or
+ * 60; only how far it has to turn to reach a distant one changes, not how
+ * many read as "in view" at a time.
  */
 function applyFrame(rotY, live, cardEls, mirrorEls) {
   if (!live) return;
@@ -180,27 +230,29 @@ function applyFrame(rotY, live, cardEls, mirrorEls) {
   const cardH = (narrow ? 300 : 460) * clamp(cardScale, 0.5, 1.8);
   // The furthest a card ever eases out to, either side.
   const edgeX = Math.max(60, stageW * 0.4) * clamp(spacing, 0.4, 2.2);
-
-  const xOf = (totalDeg) => {
-    const wrapped = mod(totalDeg + 180, 360) - 180;
-    return shapeT(wrapped / 180) * edgeX;
-  };
+  // Never more rings than the ring actually has room for either side — so
+  // a short ring (fewer looks than twice this) still fully fades out right
+  // at its own wrap point, same as always, instead of still being half-lit
+  // the instant it has to flip to the other edge.
+  const half = n / 2;
+  const rings = Math.max(1, Math.min(FALLOFF_RINGS, half));
 
   for (let i = 0; i < n; i++) {
     const localDeg = i * stepAngle; // this card's own, fixed spot on the ring
     const totalDeg = localDeg + rotY; // where that spot currently faces
-    const rad = (totalDeg * Math.PI) / 180;
-    // 1 at dead centre, 0 at the furthest point of the turn — smooth and
-    // periodic, so it is never re-derived or re-wrapped by hand.
-    const depth = (Math.cos(rad) + 1) / 2;
-    const backness = 1 - depth;
-    const x = xOf(totalDeg);
+    // How many rings away from centre this card is right now, continuous
+    // and signed, the short way round — the one place `n` enters the shape
+    // of the fade at all, as where it wraps.
+    const m = mod(totalDeg / stepAngle + half, n) - half;
+    const at = Math.min(Math.abs(m), rings);
+    const eased = Math.pow(clamp(1 - at / rings, 0, 1), FALLOFF_EASE);
+    const backness = 1 - eased;
+    const x = Math.sign(m || 1) * shapeByRing(at, rings) * edgeX;
     // Real depth, not a rotation — the card recedes straight back from the
     // camera (read through the stage's `perspective`), so the photo itself
     // always stays flat-on and is never skewed/"squeezed".
     const z = -backness * MAX_DEPTH;
 
-    const eased = Math.pow(depth, FALLOFF_EASE);
     const scale = BACK_SCALE + (FRONT_SCALE - BACK_SCALE) * eased;
     const lift = (1 - eased) * MAX_LIFT;
     const blur = (1 - eased) * MAX_BLUR;
@@ -221,7 +273,7 @@ function applyFrame(rotY, live, cardEls, mirrorEls) {
       el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
       el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray})`;
       el.style.opacity = opacity.toFixed(3);
-      el.style.zIndex = String(Math.round(depth * 1000) + 10);
+      el.style.zIndex = String(Math.round(eased * 1000) + 10);
     }
     const mEl = mirrorEls[i];
     if (mEl) {
@@ -292,7 +344,7 @@ export default function TryTheLook({
   defaultActiveIndex,
   activeIndex: controlledIndex,
   heading = "Try the Look.",
-  subheading = "Six looks, styled head to toe. Tap a pin to see the piece.",
+  subheading = "Nine looks, styled head to toe. Tap a pin to see the piece.",
   bundleLabel = "Complete the look",
   bundleDiscount = 0.1,
   addToBagLabel = "Add full look to bag",
@@ -319,6 +371,29 @@ export default function TryTheLook({
   );
   const n = items.length;
   const stepAngle = 360 / n;
+
+  // If a look's own photo URL is broken, swap just that card for
+  // `characterImage` instead of leaving a broken-image icon in the ring.
+  const [failedImages, setFailedImages] = useState(() => new Set());
+  const srcKey = items.map((it) => it.image).join("|");
+  useEffect(() => {
+    let cancelled = false;
+    setFailedImages(new Set());
+    items.forEach((it, i) => {
+      if (!it.image) return;
+      const probe = new Image();
+      probe.onerror = () => {
+        if (cancelled) return;
+        setFailedImages((prev) => (prev.has(i) ? prev : new Set(prev).add(i)));
+      };
+      probe.src = it.image;
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcKey]);
+  const srcOf = (i) => (failedImages.has(i) ? characterImage : items[i].image);
 
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(autoplay);
@@ -510,7 +585,7 @@ export default function TryTheLook({
                   style={{ ...baseStyle, pointerEvents: "none", zIndex: 1 }}
                 >
                   <img
-                    src={look.image}
+                    src={srcOf(i)}
                     alt=""
                     draggable={false}
                     style={{
@@ -541,7 +616,7 @@ export default function TryTheLook({
                   }}
                 >
                   <img
-                    src={look.image}
+                    src={srcOf(i)}
                     alt={look.label}
                     draggable={false}
                     style={{

@@ -39,6 +39,7 @@ function Editor({ c }) {
   const [device, setDevice] = useState("full");
   const [menu, setMenu] = useState(false);
   const [note, setNote] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const menuRef = useRef(null);
 
   // A control with `presets` (a variant, say) also sets the controls it names.
@@ -160,7 +161,13 @@ function Editor({ c }) {
 
       <div className="flex min-h-0 flex-1 flex-col-reverse md:flex-row">
         {/* sidebar */}
-        <aside className="flex min-h-0 flex-1 flex-col border-t border-[var(--line)] bg-[#161616] md:w-[340px] md:flex-none md:border-r md:border-t-0">
+        <aside
+          className={`flex min-h-0 flex-col border-t border-[var(--line)] bg-[#161616] md:border-r md:border-t-0 ${
+            sidebarCollapsed
+              ? "hidden md:block md:w-0 md:flex-none md:overflow-hidden md:border-r-0"
+              : "flex-1 md:w-[340px] md:flex-none"
+          }`}
+        >
           <div
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2"
             style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
@@ -212,20 +219,32 @@ function Editor({ c }) {
         {/* live preview */}
         <section className="flex h-[42dvh] min-h-0 shrink-0 flex-col bg-[#050505] md:h-auto md:flex-1">
           <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-[var(--line)] px-3">
-            <div className="flex rounded-lg bg-black p-0.5" role="group" aria-label="Preview width">
-              {DEVICES.map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setDevice(id)}
-                  aria-pressed={device === id}
-                  className={`h-8 rounded-md px-3 text-[13px] transition-colors ${
-                    device === id ? "bg-[#333] text-white" : "text-[var(--muted)] hover:text-white"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed((v) => !v)}
+                aria-pressed={sidebarCollapsed}
+                aria-label={sidebarCollapsed ? "Show controls" : "Hide controls for a full-screen preview"}
+                title={sidebarCollapsed ? "Show controls" : "Hide controls (full-screen preview)"}
+                className="h-8 rounded-md border border-[var(--line)] px-2.5 text-[13px] text-[var(--muted)] transition-colors hover:text-white"
+              >
+                {sidebarCollapsed ? "⟩⟩ Controls" : "⟨⟨ Hide"}
+              </button>
+              <div className="flex rounded-lg bg-black p-0.5" role="group" aria-label="Preview width">
+                {DEVICES.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setDevice(id)}
+                    aria-pressed={device === id}
+                    className={`h-8 rounded-md px-3 text-[13px] transition-colors ${
+                      device === id ? "bg-[#333] text-white" : "text-[var(--muted)] hover:text-white"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
             <span className="hidden text-xs text-[var(--muted)] sm:block">
               Live preview · drag or scroll to try it
