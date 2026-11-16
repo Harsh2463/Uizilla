@@ -83,6 +83,10 @@ const FAR_FRACTION = 0.97;
  * drawn once at each edge) sits — a little short of the 3rd card's own
  * position, so it reads as tucked in just behind it, not side by side. */
 const MIRROR_X_FRACTION = 0.8;
+/** Cubic ease-out — the turn starts at full speed and settles gently,
+ * whether it is one ring or five; only the overall duration changes with
+ * distance, never the shape of the curve. */
+const EASE = (t) => 1 - Math.pow(1 - t, 3);
 
 const SWATCH_COLORS = ["#D9CDBF", "#1A1A1C", "#9AA3AD", "#6B5B4D", "#3C4654", "#B8471F"];
 
@@ -149,6 +153,86 @@ const shortestSteps = (from, to, n) => {
   const half = Math.floor(n / 2);
   return mod(to - from + half, n) - half;
 };
+
+// How far out a card sits, as a share of the furthest it ever travels — one
+// step out stays well inward (a gap before the far cluster), two steps out
+// lands almost at the very edge. `t` is the angle wrapped into (-1,1].
+const shapeT = (t) => {
+  const at = Math.abs(t);
+  const near = at <= 1 / 3 ? (NEAR_FRACTION / (1 / 3)) * at
+    : at <= 2 / 3 ? NEAR_FRACTION + (FAR_FRACTION - NEAR_FRACTION) * ((at - 1 / 3) / (1 / 3))
+    : FAR_FRACTION + (1 - FAR_FRACTION) * ((at - 2 / 3) / (1 / 3));
+  return Math.sign(t) * near;
+};
+
+/**
+ * Writes every card's position, depth, blur and fade straight to the DOM for
+ * one instant of `rotY` (degrees). Called every animation frame with the
+ * ring's current, continuously-eased angle — never left for CSS to tween
+ * between two computed snapshots — so a long turn follows exactly the same
+ * curve a short one does, just for longer, with no seam to catch it out.
+ */
+function applyFrame(rotY, live, cardEls, mirrorEls) {
+  if (!live) return;
+  const { box, narrow, spacing, cardScale, n, stepAngle } = live;
+  const stageW = (box.w || 600) - (narrow ? 0 : 340);
+  const cardW = (narrow ? 120 : 170) * clamp(cardScale, 0.5, 1.8);
+  const cardH = (narrow ? 300 : 460) * clamp(cardScale, 0.5, 1.8);
+  // The furthest a card ever eases out to, either side.
+  const edgeX = Math.max(60, stageW * 0.4) * clamp(spacing, 0.4, 2.2);
+
+  const xOf = (totalDeg) => {
+    const wrapped = mod(totalDeg + 180, 360) - 180;
+    return shapeT(wrapped / 180) * edgeX;
+  };
+
+  for (let i = 0; i < n; i++) {
+    const localDeg = i * stepAngle; // this card's own, fixed spot on the ring
+    const totalDeg = localDeg + rotY; // where that spot currently faces
+    const rad = (totalDeg * Math.PI) / 180;
+    // 1 at dead centre, 0 at the furthest point of the turn — smooth and
+    // periodic, so it is never re-derived or re-wrapped by hand.
+    const depth = (Math.cos(rad) + 1) / 2;
+    const backness = 1 - depth;
+    const x = xOf(totalDeg);
+    // Real depth, not a rotation — the card recedes straight back from the
+    // camera (read through the stage's `perspective`), so the photo itself
+    // always stays flat-on and is never skewed/"squeezed".
+    const z = -backness * MAX_DEPTH;
+
+    const eased = Math.pow(depth, FALLOFF_EASE);
+    const scale = BACK_SCALE + (FRONT_SCALE - BACK_SCALE) * eased;
+    const lift = (1 - eased) * MAX_LIFT;
+    const blur = (1 - eased) * MAX_BLUR;
+    const opacity = MIN_OPACITY + (1 - MIN_OPACITY) * eased;
+    // Only the card nearest the far point of the turn ever shows a mirror at
+    // the opposite edge — a step or two out shows just its own side.
+    const mirrorOpacity = opacity * Math.pow(backness, MIRROR_POWER);
+    // The mirror's own spot is fixed (a little short of the edge, on
+    // whichever side `x` isn't), not just `x` flipped — so it reads as its
+    // own card tucked behind the 3rd one, not a copy riding on it.
+    const mirrorX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
+    const gray = clamp(backness * 0.55, 0, 0.55).toFixed(3);
+
+    const el = cardEls[i];
+    if (el) {
+      el.style.width = `${cardW}px`;
+      el.style.height = `${cardH}px`;
+      el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
+      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray})`;
+      el.style.opacity = opacity.toFixed(3);
+      el.style.zIndex = String(Math.round(depth * 1000) + 10);
+    }
+    const mEl = mirrorEls[i];
+    if (mEl) {
+      mEl.style.width = `${cardW}px`;
+      mEl.style.height = `${cardH}px`;
+      mEl.style.transform = `translateX(calc(-50% + ${mirrorX.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${(-MAX_DEPTH).toFixed(1)}px) scale(${BACK_SCALE})`;
+      mEl.style.filter = `blur(${MAX_BLUR}px)`;
+      mEl.style.opacity = mirrorOpacity.toFixed(3);
+    }
+  }
+}
 
 function normPieces(pieces) {
   if (!Array.isArray(pieces)) return [];
@@ -243,22 +327,32 @@ export default function TryTheLook({
 
   const isControlled = controlledIndex != null;
   const startActive = clamp(defaultActiveIndex ?? Math.min(4, n - 1), 0, Math.max(0, n - 1));
-  // `active` is which look the panel shows; `rotY` is the ring's own total
-  // turn so far, in degrees. rotY only ever accumulates — turning the ring
-  // one step adds or subtracts exactly `stepAngle`, it never wraps back into
-  // 0–360 — so a card's position is a continuous function of time and never
-  // has to "teleport" to stay in range.
-  const [turn, setTurn] = useState({ active: startActive, rotY: -startActive * stepAngle, steps: 1 });
-  const live = useRef(turn);
-  live.current = turn;
-  // The rotation this component last finished a transition *from* — read
-  // during render to tell a normal, small move apart from the one card
-  // whose on-screen side has to flip this step, so only that one card's
-  // position (never its fade) skips the transition.
-  const prevRotYRef = useRef(turn.rotY);
-  useEffect(() => {
-    prevRotYRef.current = turn.rotY;
-  }, [turn.rotY]);
+  // `activeState` is a normal React value — read for the sidebar, the nav
+  // and which card is "active" — and only ever changes once per click, so it
+  // re-renders cheaply. The ring's actual turn, in degrees, lives outside
+  // React entirely, in `rotYRef`: it only ever accumulates (never snapped
+  // back into 0–360), and every card's position, scale, blur and fade is
+  // recomputed from it fresh on every animation frame — never left for CSS
+  // to interpolate between two snapshots, which is what let a long turn
+  // drift out of step with itself and flicker. A short turn and a long one
+  // now run the exact same way, just for proportionally longer.
+  const [activeState, setActiveState] = useState(startActive);
+  const activeRef = useRef(startActive);
+  const rotYRef = useRef(-startActive * stepAngle);
+  // The turn in flight, if any: eases rotYRef from `from` to `to` over
+  // `duration` seconds, started at `start` (performance.now()). Reading
+  // rotYRef.current as `from` for a new click — rather than the old click's
+  // target — is what keeps rapid successive clicks smooth: each one just
+  // redirects the ring from wherever it actually, visually is right now.
+  const animRef = useRef(null);
+  // Everything the frame loop needs that can change from outside a click —
+  // read fresh every frame so a prop change lands on the very next frame.
+  const liveRef = useRef(null);
+  liveRef.current = { box, narrow: box.w > 0 && box.w < 760, spacing, cardScale, n, stepAngle };
+  // One DOM node per card, and its mirrored echo — the frame loop writes
+  // straight to these every tick instead of going through React.
+  const cardElsRef = useRef([]);
+  const mirrorElsRef = useRef([]);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -272,23 +366,51 @@ export default function TryTheLook({
     return () => ro.disconnect();
   }, []);
 
-  // Turns the ring by `steps` whole positions (can be negative), the only
-  // place rotY ever changes, so every step is this same small, continuous
-  // nudge — including the one that carries a look past the back of the ring.
+  // Turns the ring by `steps` whole positions (can be negative) — the only
+  // place a turn is ever kicked off, including the one that carries a look
+  // past the back of the ring.
   const spin = (steps) => {
     if (!steps) return;
-    const cur = live.current;
-    const nextActive = mod(cur.active + steps, n);
-    // How many rings this particular turn has to cover, remembered so the
-    // transition can take proportionally longer — a card three rings out
-    // travels three times as far, so it gets roughly three times as long to
-    // get there, instead of being rushed through at the same pace a single
-    // step uses and reading as less smooth.
-    setTurn({ active: nextActive, rotY: cur.rotY - steps * stepAngle, steps: Math.abs(steps) });
-    if (nextActive !== cur.active) onChange?.(nextActive, items[nextActive]);
+    const nextActive = mod(activeRef.current + steps, n);
+    const from = rotYRef.current;
+    const to = from - steps * stepAngle;
+    // A card three rings out has three times as far to travel as one ring
+    // out — given proportionally more time too, so every click reads as the
+    // same steady speed of turn, not a rushed one the further the clicked
+    // character started from centre.
+    const duration = Math.max(0.15, spinSeconds) * clamp(1 + (Math.abs(steps) - 1) * 0.42, 1, 2.6);
+    animRef.current = { from, to, start: performance.now(), duration };
+    const changed = nextActive !== activeRef.current;
+    activeRef.current = nextActive;
+    setActiveState(nextActive);
+    if (changed) onChange?.(nextActive, items[nextActive]);
   };
 
-  const pickIndex = (i) => spin(shortestSteps(live.current.active, mod(i, n), n));
+  const pickIndex = (i) => spin(shortestSteps(activeRef.current, mod(i, n), n));
+
+  // The one frame loop, running for as long as the component is mounted:
+  // eases rotYRef toward whatever turn is in flight, then writes every
+  // card's transform/filter/opacity straight to the DOM from the current
+  // angle — the same thing a static render does, just every ~16ms, so a
+  // turn of any length is this one continuous motion rather than a CSS
+  // tween between two computed snapshots.
+  useEffect(() => {
+    let raf;
+    const frame = (now) => {
+      const anim = animRef.current;
+      if (anim) {
+        const t = clamp((now - anim.start) / (anim.duration * 1000), 0, 1);
+        rotYRef.current = anim.from + (anim.to - anim.from) * EASE(t);
+        if (t >= 1) animRef.current = null;
+      }
+      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current);
+      raf = requestAnimationFrame(frame);
+    };
+    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current);
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // A controlled `activeIndex` is honoured the same way a click would be:
   // spun to the short way round, not snapped.
@@ -309,7 +431,7 @@ export default function TryTheLook({
   const stopAutoplay = () => setPlaying(false);
 
   const narrow = box.w > 0 && box.w < 760;
-  const active = turn.active;
+  const active = activeState;
   const current = items[active] || items[0];
   const total = current.pieces.reduce((s, p) => s + p.price, 0);
   const discounted = total * (1 - clamp(bundleDiscount, 0, 1));
@@ -367,188 +489,105 @@ export default function TryTheLook({
             WebkitPerspective: `${Math.max(900, (box.w || 600) * 1.3)}px`,
           }}
         >
-          {(() => {
-            const stageW = (box.w || 600) - (narrow ? 0 : 340);
-            const cardW = (narrow ? 120 : 170) * clamp(cardScale, 0.5, 1.8);
-            const cardH = (narrow ? 300 : 460) * clamp(cardScale, 0.5, 1.8);
-            // The furthest a card ever eases out to, either side.
-            const edgeX = Math.max(60, stageW * 0.4) * clamp(spacing, 0.4, 2.2);
-            // A card three rings out has three times as far to travel as one
-            // ring out — given proportionally more time too, so every click
-            // reads as the same steady speed of turn, not a rushed one the
-            // further the clicked character started from centre.
-            const baseDuration = Math.max(0.15, spinSeconds);
-            const duration = baseDuration * clamp(1 + (turn.steps - 1) * 0.42, 1, 2.6);
-            const prevRotY = prevRotYRef.current;
-
-            // The card's screen offset — monotonic in the angle wrapped into
-            // (-180,180], so it only ever grows as the card turns away, never
-            // swinging back through the middle on its way round. Shaped, not
-            // a plain sine: one step out (the "2nd" card) stays well inward,
-            // two steps out (the "3rd") lands almost at the very edge, so the
-            // row reads as centre → a clear gap → a cluster at each edge,
-            // the way the reference marks it up.
-            const shapeT = (t) => {
-              const at = Math.abs(t);
-              const near = at <= 1 / 3 ? (NEAR_FRACTION / (1 / 3)) * at
-                : at <= 2 / 3 ? NEAR_FRACTION + (FAR_FRACTION - NEAR_FRACTION) * ((at - 1 / 3) / (1 / 3))
-                : FAR_FRACTION + (1 - FAR_FRACTION) * ((at - 2 / 3) / (1 / 3));
-              return Math.sign(t) * near;
+          {items.map((look, i) => {
+            const isActive = i === active;
+            // Base placement only — every frame, `applyFrame` overwrites
+            // width/height/transform/filter/opacity/zIndex on these same
+            // nodes directly, so nothing here needs to track the turn.
+            const baseStyle = {
+              position: "absolute",
+              left: "50%",
+              bottom: 0,
+              transformOrigin: "50% 100%",
             };
-            const xOf = (totalDeg) => {
-              const wrapped = mod(totalDeg + 180, 360) - 180;
-              return shapeT(wrapped / 180) * edgeX;
-            };
-
-            return items.map((look, i) => {
-              const localDeg = i * stepAngle; // this card's own, fixed spot on the ring
-              const totalDeg = localDeg + turn.rotY; // where that spot currently faces,
-              // a value that only ever accumulates — never reset into 0–360 — so it
-              // changes by exactly one step at a time and nothing has to teleport.
-              const rad = (totalDeg * Math.PI) / 180;
-              // 1 at dead centre, 0 at the furthest point of the turn — smooth and
-              // periodic, so it is never re-derived or re-wrapped by hand.
-              const depth = (Math.cos(rad) + 1) / 2;
-              const backness = 1 - depth;
-              const isActive = i === active;
-              const x = xOf(totalDeg);
-              // Real depth, not a rotation — the card recedes straight back
-              // from the camera (read through the stage's `perspective`, the
-              // same depth cue RoundCarousel's ring uses), so the photo
-              // itself always stays flat-on and is never skewed/"squeezed".
-              const z = -backness * MAX_DEPTH;
-
-              const eased = Math.pow(depth, FALLOFF_EASE);
-              const scale = BACK_SCALE + (FRONT_SCALE - BACK_SCALE) * eased;
-              // A few px of rise, not a size change — reads as "closer or
-              // further", the way RoundCarousel's own cards sit on a ring.
-              const lift = (1 - eased) * MAX_LIFT;
-              const blur = (1 - eased) * MAX_BLUR;
-              const opacity = MIN_OPACITY + (1 - MIN_OPACITY) * eased;
-              // Only the card nearest the far point of the turn ever shows a mirror
-              // at the opposite edge — a step or two out shows just its own side.
-              const mirrorOpacity = opacity * Math.pow(backness, MIRROR_POWER);
-              // The mirror's own spot is fixed (a little short of the edge, on
-              // whichever side `x` isn't), not just `x` flipped — so it reads as
-              // its own card tucked behind the 3rd one, not a copy riding on it.
-              const mirrorX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
-
-              // Once a lap, this card's `x` is the one that has to flip from one
-              // edge straight to the other. Detected by whether this turn
-              // actually carried it across that seam (not by how far it moved
-              // — a legitimate multi-ring click moves plenty far on its own
-              // and must still animate normally) — so only that one card's
-              // position snaps there with no transition, instead of visibly
-              // sliding back across the row.
-              const wrapCountOf = (deg) => Math.floor((deg + 180) / 360);
-              const snapped = wrapCountOf(totalDeg) !== wrapCountOf(localDeg + prevRotY);
-              // A literal "0s", not the "none" keyword — "none" can only ever
-              // be a transition's one and only value, so it would cancel the
-              // filter/opacity transitions listed right beside it too.
-              const moveTransition = snapped ? "transform 0s" : `transform ${duration}s cubic-bezier(.22,.9,.3,1)`;
-              const fadeTransition = `filter ${duration}s ease, opacity ${duration}s ease`;
-
-              const cardStyle = (mirror) => ({
-                position: "absolute",
-                left: "50%",
-                bottom: 0,
-                width: cardW,
-                height: cardH,
-                transform: `translateX(calc(-50% + ${(mirror ? mirrorX : x).toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${(mirror ? -MAX_DEPTH : z).toFixed(1)}px) scale(${mirror ? BACK_SCALE : scale})`,
-                transformOrigin: "50% 100%",
-                transition: `${moveTransition}, ${fadeTransition}`,
-                filter: `blur(${(mirror ? MAX_BLUR : blur).toFixed(2)}px) grayscale(${clamp(backness * 0.55, 0, 0.55)})`,
-                opacity: (mirror ? mirrorOpacity : opacity).toFixed(3),
-                zIndex: mirror ? 1 : Math.round(depth * 1000) + 10,
-              });
-
-              return (
-                <Fragment key={i}>
-                  {/* the mirrored echo at the opposite edge — only visible at all
-                      once this card is the one furthest round the turn */}
-                  <div
-                    aria-hidden="true"
-                    style={{ ...cardStyle(true), pointerEvents: "none" }}
-                  >
-                    <img
-                      src={look.image}
-                      alt=""
-                      draggable={false}
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "contain",
-                        objectPosition: "50% 100%",
-                        userSelect: "none",
-                        pointerEvents: "none",
-                      }}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handlePick(i)}
-                    aria-label={`Show the ${look.label} look`}
-                    aria-pressed={isActive}
+            return (
+              <Fragment key={i}>
+                {/* the mirrored echo at the opposite edge — only visible at all
+                    once this card is the one furthest round the turn */}
+                <div
+                  ref={(el) => (mirrorElsRef.current[i] = el)}
+                  aria-hidden="true"
+                  style={{ ...baseStyle, pointerEvents: "none", zIndex: 1 }}
+                >
+                  <img
+                    src={look.image}
+                    alt=""
+                    draggable={false}
                     style={{
-                      ...cardStyle(false),
-                      border: "none",
-                      background: "none",
-                      padding: 0,
-                      cursor: isActive ? "default" : "pointer",
+                      position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      objectPosition: "50% 100%",
+                      userSelect: "none",
+                      pointerEvents: "none",
                     }}
-                  >
-                    <img
-                      src={look.image}
-                      alt={look.label}
-                      draggable={false}
+                  />
+                </div>
+
+                <button
+                  ref={(el) => (cardElsRef.current[i] = el)}
+                  type="button"
+                  onClick={() => handlePick(i)}
+                  aria-label={`Show the ${look.label} look`}
+                  aria-pressed={isActive}
+                  style={{
+                    ...baseStyle,
+                    border: "none",
+                    background: "none",
+                    padding: 0,
+                    cursor: isActive ? "default" : "pointer",
+                  }}
+                >
+                  <img
+                    src={look.image}
+                    alt={look.label}
+                    draggable={false}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      objectPosition: "50% 100%",
+                      userSelect: "none",
+                      pointerEvents: "none",
+                      filter: isActive
+                        ? "drop-shadow(0 18px 26px rgba(0,0,0,0.22))"
+                        : "none",
+                    }}
+                  />
+                  {isActive && (
+                    <span
                       style={{
                         position: "absolute",
-                        inset: 0,
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "contain",
-                        objectPosition: "50% 100%",
-                        userSelect: "none",
+                        left: "50%",
+                        bottom: "42%",
+                        transform: "translate(-50%, 50%)",
+                        width: 64,
+                        height: 64,
+                        borderRadius: "50%",
+                        background: "rgba(255,255,255,0.55)",
+                        backdropFilter: "blur(2px)",
+                        border: "1px solid rgba(0,0,0,0.12)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 11,
+                        letterSpacing: "0.08em",
+                        fontWeight: 600,
+                        color: "#111",
                         pointerEvents: "none",
-                        filter: isActive
-                          ? "drop-shadow(0 18px 26px rgba(0,0,0,0.22))"
-                          : "none",
                       }}
-                    />
-                    {isActive && (
-                      <span
-                        style={{
-                          position: "absolute",
-                          left: "50%",
-                          bottom: "42%",
-                          transform: "translate(-50%, 50%)",
-                          width: 64,
-                          height: 64,
-                          borderRadius: "50%",
-                          background: "rgba(255,255,255,0.55)",
-                          backdropFilter: "blur(2px)",
-                          border: "1px solid rgba(0,0,0,0.12)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 11,
-                          letterSpacing: "0.08em",
-                          fontWeight: 600,
-                          color: "#111",
-                          pointerEvents: "none",
-                        }}
-                      >
-                        VIEW
-                      </span>
-                    )}
-                  </button>
-                </Fragment>
-              );
-            });
-          })()}
+                    >
+                      VIEW
+                    </span>
+                  )}
+                </button>
+              </Fragment>
+            );
+          })}
         </div>
 
         {/* -------------------------------------------------- bottom nav */}
