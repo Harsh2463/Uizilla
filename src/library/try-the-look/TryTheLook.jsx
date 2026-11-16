@@ -58,6 +58,11 @@ const BACK_SCALE = 0.94;
 /** How many px a card rises as it eases out — a few pixels' difference by
  * how close it is to centre, not a size change. */
 const MAX_LIFT = 22;
+/** How many px shorter a card stands per ring out — its height drops by
+ * exactly this much for every full ring of distance, so standing order
+ * reads straight off position/priority: whichever is front and centre is
+ * always the tallest. */
+const HEIGHT_STEP_PX = 25;
 /** Blur (px) once a card has eased all the way to the edge; 0 at centre. */
 const MAX_BLUR = 8;
 /** Opacity once a card has eased all the way to the edge; 1 at centre. Kept
@@ -276,10 +281,23 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls) {
     const mirrorX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
     const gray = clamp(backness * 0.55, 0, 0.55).toFixed(3);
 
+    // A step down in height per ring out — the closer a card's priority to
+    // front and centre, the taller it stands; continuous in `at`, same as
+    // everything else, so a card eases through this exactly as smoothly as
+    // it eases through its position, never snapping a fixed amount at once.
+    // The photo is taller than it is wide, so with `objectFit: "contain"`
+    // its *width* is what actually bounds its rendered size — shrinking
+    // only the box's height left the picture exactly as big as before,
+    // just with slack above it. Carrying the same ratio onto the width
+    // keeps the character in proportion (never stretched) while actually
+    // making it read as smaller, step by step, the further out it is.
+    const cardHForRing = cardH - at * HEIGHT_STEP_PX;
+    const cardWForRing = cardW * (cardHForRing / cardH);
+
     const el = cardEls[i];
     if (el) {
-      el.style.width = `${cardW}px`;
-      el.style.height = `${cardH}px`;
+      el.style.width = `${cardWForRing.toFixed(1)}px`;
+      el.style.height = `${cardHForRing.toFixed(1)}px`;
       el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
       el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray})`;
       el.style.opacity = opacity.toFixed(3);
