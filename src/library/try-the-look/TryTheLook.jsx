@@ -227,7 +227,13 @@ const shapeByRing = (at, rings) => {
  * many read as "in view" at a time.
  */
 function applyFrame(rotY, live, cardEls, mirrorEls, viewEls) {
-  if (!live) return;
+  // However it happened, a non-finite angle must never be written into a
+  // style — that's what a genuinely broken frame (every card's `transform`
+  // literally the string "NaN") would look like. Leaving the last good
+  // frame on screen instead means there's nothing to see even for the one
+  // tick this guards against, and the very next turn — which computes its
+  // target from the clicked index alone, never from this `rotY` — heals it.
+  if (!live || !Number.isFinite(rotY)) return;
   const { box, narrow, spacing, cardScale, n, stepAngle } = live;
   const stageW = (box.w || 600) - (narrow ? 0 : 340);
   const cardW = (narrow ? 120 : 170) * clamp(cardScale, 0.5, 1.8);
@@ -522,12 +528,27 @@ export default function TryTheLook({
     return () => ro.disconnect();
   }, []);
 
+  // Brings a possibly-stale/out-of-range activeRef back in range (say the
+  // look count changed while one was mid-turn) rather than trusting it as
+  // -is — the one place both `spin` and `pickIndex` read "the active index"
+  // from, so a hypothetical bad value can't send one to a different target
+  // than the other.
+  const healedActive = () => mod(Math.trunc(activeRef.current) || 0, n);
+
   // Turns the ring by `steps` whole positions (can be negative) — the only
   // place a turn is ever kicked off, including the one that carries a look
   // past the back of the ring.
   const spin = (steps) => {
     if (!steps) return;
-    const nextActive = mod(activeRef.current + steps, n);
+    const curActive = healedActive();
+    // A non-finite angle (there's no code path that produces one, but
+    // nothing downstream should be able to get stuck on one either) is
+    // thrown out for the one centred angle the current look already
+    // defines, rather than carried into the maths below — this turn starts
+    // from a known-good place even if the last one somehow didn't end on
+    // one.
+    const nextActive = mod(curActive + steps, n);
+    const liveRotY = Number.isFinite(rotYRef.current) ? rotYRef.current : -curActive * stepAngle;
     // Bled back toward 0 by whole laps before use — rotY is free to run up
     // over a long session (thousands of clicks, autoplay left running for
     // hours), and every formula below is exactly as periodic in 360° as the
@@ -535,7 +556,7 @@ export default function TryTheLook({
     // keeps the numbers small so nothing downstream ever has to deal with
     // an oversized angle that stops reading as "perfect" through sheer
     // floating-point distance from zero.
-    const from = rotYRef.current - Math.round(rotYRef.current / 360) * 360;
+    const from = liveRotY - Math.round(liveRotY / 360) * 360;
     // The one rotY that puts `nextActive` dead centre — fixed by its index
     // alone, never by how this turn started — nudged by whichever whole lap
     // keeps it closest to `from`, so the turn still takes the short way
@@ -554,13 +575,13 @@ export default function TryTheLook({
     // character started from centre.
     const duration = Math.max(0.15, spinSeconds) * clamp(1 + (Math.abs(steps) - 1) * 0.42, 1, 2.6);
     animRef.current = { from, to, start: performance.now(), duration };
-    const changed = nextActive !== activeRef.current;
+    const changed = nextActive !== curActive;
     activeRef.current = nextActive;
     setActiveState(nextActive);
     if (changed) onChange?.(nextActive, items[nextActive]);
   };
 
-  const pickIndex = (i) => spin(shortestSteps(activeRef.current, mod(i, n), n));
+  const pickIndex = (i) => spin(shortestSteps(healedActive(), mod(i, n), n));
 
   // The one frame loop, running for as long as the component is mounted:
   // eases rotYRef toward whatever turn is in flight, then writes every
