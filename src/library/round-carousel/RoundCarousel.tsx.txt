@@ -1,0 +1,390 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
+export interface RoundCarouselImage {
+  src: string;
+}
+
+export interface RoundCarouselProps {
+  images?: RoundCarouselImage[];
+  imageWidth?: number;
+  imageHeight?: number;
+  spacing?: number;
+  speed?: number;
+  direction?: "right" | "left";
+  drag?: boolean;
+  sensitivity?: number;
+  tilt?: number;
+  perspective?: number;
+  cornerRadius?: number;
+  curve?: number;
+  innerDim?: number;
+  background?: string;
+  style?: React.CSSProperties;
+}
+
+interface CurvedCardProps {
+  src: string;
+  w: number;
+  h: number;
+  corner: number;
+  curve: number;
+  innerDim: number;
+}
+
+const u = (id: string) =>
+  `https://images.unsplash.com/${id}?auto=format&fit=crop&w=800&h=800&q=80`;
+
+// Built-in fallback images. Used when no `images` prop is passed, when the list is
+// empty, when an item has no `src`, or when an image URL fails to load.
+const FALLBACK_IMAGES: RoundCarouselImage[] = [
+  "photo-1506744038136-46273834b3fb",
+  "photo-1469474968028-56623f02e42e",
+  "photo-1441974231531-c6227db76b6e",
+  "photo-1470071459604-3b5ec3a7fe05",
+  "photo-1501785888041-af3ef285b470",
+  "photo-1472214103451-9374bd1c798e",
+  "photo-1465146344425-f00d5f5c8f07",
+  "photo-1447752875215-b2761acb3c5d",
+].map((id) => ({ src: u(id) }));
+
+const MIN_SLICES = 14;
+const MAX_SLICES = 36;
+
+/**
+ * A card bent outwards like a section of a cylinder.
+ * It is built from many very thin vertical slices laid along a circular arc,
+ * so it needs no WebGL or extra libraries. `curve` is the arc, in degrees,
+ * across the card. Slices overlap slightly and the edge shading is one smooth
+ * gradient across the whole card, so the picture reads as a single surface.
+ */
+function CurvedCard({ src, w, h, corner, curve, innerDim }: CurvedCardProps) {
+  const n = Math.max(MIN_SLICES, Math.min(MAX_SLICES, Math.ceil(w / 8)));
+  const sw = w / n;
+  const win = sw + 3; // each slice is 3px wider than its share, so neighbours overlap
+  const R = w / ((curve * Math.PI) / 180); // radius of curvature
+  const edgeShade = 0.2 * Math.min(1, curve / 60); // very soft darkening at the edges
+  const backShade = Math.max(0, Math.min(1, 1 - innerDim / 10));
+
+  // The shade layers span the whole card (not one slice), so every slice samples
+  // the same continuous gradient and no seams can appear at any zoom level.
+  const front = `linear-gradient(to right, rgba(0,0,0,${edgeShade}), rgba(0,0,0,0) 50%, rgba(0,0,0,${edgeShade}))`;
+  const back = `linear-gradient(rgba(0,0,0,${backShade}), rgba(0,0,0,${backShade}))`;
+
+  const face: React.CSSProperties = {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    overflow: "hidden",
+    backfaceVisibility: "hidden",
+    WebkitBackfaceVisibility: "hidden",
+  };
+  // Full-card-size picture, shifted so this slice shows the right part of it.
+  // The shade is a gradient drawn on top of the picture in the same element.
+  const photo = (offset: number, shade: string): React.CSSProperties => ({
+    position: "absolute",
+    top: 0,
+    left: -offset,
+    width: w,
+    height: h,
+    borderRadius: corner,
+    backgroundColor: "#222",
+    backgroundImage: `${shade}, url("${src}")`,
+    backgroundRepeat: "no-repeat",
+    backgroundSize: "100% 100%, cover",
+    backgroundPosition: "0 0, center",
+  });
+
+  const slices: React.ReactElement[] = [];
+  for (let k = 0; k < n; k++) {
+    const x0 = k * sw - 1.5; // left edge of this slice (flat)
+    const c = x0 + win / 2 - w / 2; // flat centre, measured from the card centre
+    const phi = c / R; // angle on the arc
+    const dx = R * Math.sin(phi) - c;
+    const dz = R * (Math.cos(phi) - 1);
+    const mx = (n - 1 - k) * sw - 1.5; // back face reads correctly from inside
+    slices.push(
+      <div
+        key={k}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: x0,
+          width: win,
+          height: h,
+          transformStyle: "preserve-3d",
+          transform: `translate3d(${dx}px, 0, ${dz}px) rotateY(${phi}rad)`,
+        }}
+      >
+        <div style={face}>
+          <div style={photo(x0, front)} />
+        </div>
+        <div style={{ ...face, transform: "rotateY(180deg)" }}>
+          <div style={photo(mx, back)} />
+        </div>
+      </div>
+    );
+  }
+  return <>{slices}</>;
+}
+
+/**
+ * RoundCarousel — a 3D ring of images that auto-rotates and can be dragged.
+ *
+ * Self-contained: copy this single file into any React (16.8+) project and
+ * render <RoundCarousel />. No other packages, CSS or files needed.
+ * Missing or broken images automatically fall back to the built-in list.
+ * `curve` (degrees) bends each card outwards; 0 keeps cards flat.
+ * It fills 100% of its parent and scales itself to fit, so give the parent
+ * a height, e.g. <div style={{ height: 480 }}><RoundCarousel /></div>
+ */
+export default function RoundCarousel({
+  images = FALLBACK_IMAGES,
+  imageWidth = 300,
+  imageHeight = 300,
+  spacing = 3,
+  speed = 7,
+  direction = "right",
+  drag = true,
+  sensitivity = 5,
+  tilt = -7,
+  perspective = 3000,
+  cornerRadius = 22,
+  curve = 30,
+  innerDim = 3.5,
+  background = "#000000",
+  style = {},
+}: RoundCarouselProps) {
+  const items = images && images.length > 0 ? images : FALLBACK_IMAGES;
+  const count = items.length;
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const ringRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef(0);
+  const rotYRef = useRef(0);
+  const velRef = useRef(0);
+  const lastRef = useRef(0);
+  const dragRef = useRef({ active: false, x: 0 });
+  const reducedRef = useRef(false);
+
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [failed, setFailed] = useState<Set<number>>(() => new Set());
+
+  // If an image URL is broken, swap just that card for a built-in fallback.
+  const srcKey = items.map((it) => it?.src || "").join("|");
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(new Set());
+    items.forEach((it, i) => {
+      if (!it?.src) return;
+      const probe = new Image();
+      probe.onerror = () => {
+        if (cancelled) return;
+        setFailed((prev) => (prev.has(i) ? prev : new Set(prev).add(i)));
+      };
+      probe.src = it.src;
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcKey]);
+
+  const pickSrc = (i: number) => {
+    const src = items[i]?.src;
+    return !src || failed.has(i)
+      ? FALLBACK_IMAGES[i % FALLBACK_IMAGES.length].src
+      : src;
+  };
+
+  // Measure the container before first paint, then keep it in sync.
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setBox({ w: r.width, h: r.height });
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setBox({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Respect "reduce motion": no auto-spin (dragging still works).
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => (reducedRef.current = mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // Scale every dimension together so proportions stay pixel-identical
+  // from a 320px phone to a 4K monitor.
+  const scale =
+    box.w && box.h
+      ? Math.min(1, (box.w * 0.52) / imageWidth, (box.h * 0.55) / imageHeight)
+      : 1;
+
+  const w = imageWidth * scale;
+  const h = imageHeight * scale;
+  const angle = 360 / count;
+  const factor = 1 + spacing * 0.15;
+  const radius = (w * factor) / (2 * Math.tan(Math.PI / count));
+  const persp = perspective * scale;
+  const corner = cornerRadius * scale;
+  const degPerSec = speed * 6 * (direction === "left" ? -1 : 1);
+
+  useEffect(() => {
+    const ring = ringRef.current;
+    if (!ring) return;
+    lastRef.current = 0;
+
+    const apply = () => {
+      ring.style.transform = `translateZ(${-radius}px) rotateY(${rotYRef.current}deg)`;
+    };
+    apply();
+
+    const draw = (now: number) => {
+      const dt = lastRef.current ? (now - lastRef.current) / 1000 : 0;
+      lastRef.current = now;
+      const f = Math.min(dt, 0.1);
+      if (!dragRef.current.active) {
+        if (Math.abs(velRef.current) > 0.01) {
+          rotYRef.current += velRef.current * f;
+          velRef.current *= 0.94;
+        } else if (!reducedRef.current) {
+          rotYRef.current += degPerSec * f;
+        }
+      }
+      apply();
+      rafRef.current = requestAnimationFrame(draw);
+    };
+    rafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [radius, degPerSec, count]);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = { active: true, x: e.clientX };
+    velRef.current = 0;
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d.active) return;
+    const dx = e.clientX - d.x;
+    d.x = e.clientX;
+    const k = 0.3 * sensitivity;
+    rotYRef.current += dx * k;
+    velRef.current = dx * k * 60;
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    dragRef.current.active = false;
+  };
+
+  const faceBase: React.CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    borderRadius: corner,
+    overflow: "hidden",
+    backfaceVisibility: "hidden",
+    WebkitBackfaceVisibility: "hidden",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      style={{
+        ...style,
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        background,
+        perspective: `${persp}px`,
+        WebkitPerspective: `${persp}px`,
+        cursor: drag ? "grab" : "default",
+        // lets the page scroll vertically on touch while horizontal drags spin the ring
+        touchAction: drag ? "pan-y" : "auto",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+    >
+      <div
+        style={{
+          transformStyle: "preserve-3d",
+          transform: `rotateX(${tilt}deg)`,
+        }}
+      >
+        <div
+          ref={ringRef}
+          style={{
+            position: "relative",
+            width: w,
+            height: h,
+            transformStyle: "preserve-3d",
+            willChange: "transform",
+          }}
+        >
+          {items.map((_, i) => {
+            const src = pickSrc(i);
+            return (
+              <div
+                key={i}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  transform: `rotateY(${i * angle}deg) translateZ(${radius}px)`,
+                  transformStyle: "preserve-3d",
+                }}
+              >
+                {curve > 0 ? (
+                  <CurvedCard
+                    src={src}
+                    w={w}
+                    h={h}
+                    corner={corner}
+                    curve={curve}
+                    innerDim={innerDim}
+                  />
+                ) : (
+                  <>
+                    <div
+                      style={{
+                        ...faceBase,
+                        backgroundColor: "#222",
+                        backgroundImage: `url("${src}")`,
+                        boxShadow: `0 ${10 * scale}px ${30 * scale}px rgba(0,0,0,0.35)`,
+                      }}
+                    />
+                    <div
+                      style={{
+                        ...faceBase,
+                        transform: "rotateY(180deg)",
+                        backgroundColor: "#181818",
+                        backgroundImage: `url("${src}")`,
+                        filter: `brightness(${innerDim / 10})`,
+                      }}
+                    />
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
