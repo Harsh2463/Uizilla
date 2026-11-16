@@ -1,6 +1,15 @@
 import TryTheLook, { DEFAULT_LOOKS } from "./TryTheLook.jsx";
 import source from "./TryTheLook.jsx?raw";
 
+// The editor's Content panel only knows a flat { src, ...fields } shape, so
+// the default it starts from is each look's photo and name plus its pieces
+// written out as plain lines — the same shape `piecesText` accepts.
+const LOOKS_DEFAULT = DEFAULT_LOOKS.map((l) => ({
+  src: l.src,
+  label: l.label,
+  piecesText: l.pieces.map((p) => `${p.brand} | ${p.name} | ${p.price}`).join("\n"),
+}));
+
 export default {
   slug: "try-the-look",
   name: "Try the Look",
@@ -16,7 +25,7 @@ export default {
 const looks = [
   {
     label: "Studio Day",
-    image: "/images/model-3.webp", // optional per-look photo; falls back to characterImage
+    src: "/images/model-3.webp", // optional per-look photo; falls back to characterImage
     pieces: [
       { brand: "Nike", name: "Sweatshirt", price: 199, color: "#D9CDBF" },
       { brand: "Nikey", name: "Tatum 5 Orbit", price: 149, color: "#1A1A1C" },
@@ -42,7 +51,15 @@ const looks = [
       default: "Nine looks, styled head to toe. Tap a pin to see the piece.",
     },
     {
-      key: "characterImage", label: "Character Image", type: "text",
+      key: "looks", label: "Looks", type: "images", noun: "Looks",
+      default: LOOKS_DEFAULT,
+      fields: [
+        { key: "label", label: "Look name" },
+        { key: "piecesText", label: "Pieces (one per line: Brand | Name | Price)", multiline: true },
+      ],
+    },
+    {
+      key: "characterImage", label: "Fallback Character Image", type: "text",
       default: "https://reel-ref-try-the-look.vercel.app/assets/model-3-640.webp",
     },
     { key: "bundleLabel", label: "Bundle Label", type: "text", default: "Complete the look" },
@@ -60,8 +77,8 @@ const looks = [
     { key: "accent", label: "Accent / Button", type: "color", default: "#111111" },
   ],
   props: [
-    ["looks", "{ label, image?, pieces: Piece[] }[]", "9 sample looks, each its own photo", "Each piece: { brand, name, price, color? }. `image` falls back to `characterImage` if a look doesn't have one. Grows to any length without changing how many cards read as \"in view\" at once."],
-    ["characterImage", "string", "model-3-640.webp demo photo", "Fallback photo for any look without its own `image`."],
+    ["looks", "{ label, src?, pieces?: Piece[], piecesText? }[]", "9 sample looks, each its own photo", "Each piece: { brand, name, price, color? }. `piecesText` is the same thing as plain \"Brand | Name | Price\" lines (what the editor's Content panel writes); a look with neither gets a placeholder set. `src` falls back to `characterImage`, or to a built-in image if it's broken. Grows to any length without changing how many cards read as \"in view\" at once."],
+    ["characterImage", "string", "model-3-640.webp demo photo", "Fallback photo for any look without its own `src`, or whose `src` fails to load."],
     ["defaultActiveIndex", "number", "min(4, looks.length - 1)", "Which look starts in focus, when `activeIndex` is not supplied."],
     ["activeIndex", "number", "undefined", "Controls the focused look from outside. Omit to let the component manage it."],
     ["heading / subheading", "string", '"Try the Look." / "Nine looks…"', "Title copy above the carousel."],

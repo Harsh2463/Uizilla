@@ -32,13 +32,17 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
  *   <div style={{ height: 640 }}><TryTheLook /></div>
  *
  * Each entry of `looks` is:
- *   { label, image?, pieces: [{ brand, name, price, color? }] }
- * `image` is that look's own photo; it falls back to `characterImage` for
- * any look that doesn't have one yet. `pieces` have no product image of
- * their own yet, so each is drawn as a plain swatch carrying its `color` and
- * its name/brand as text. `looks` can grow to any length — adding more never
- * changes how many read as "in view" at once (see `FALLOFF_RINGS`), it only
- * gives the carousel more to turn through.
+ *   { label, src?, pieces?: [{ brand, name, price, color? }], piecesText? }
+ * `src` is that look's own photo; it falls back to `characterImage` for any
+ * look that doesn't have one yet (or whose own URL turns out broken — each
+ * is probed, like RoundCarousel's own images). `pieces` have no product
+ * image of their own yet, so each is drawn as a plain swatch carrying its
+ * `color` and its name/brand as text; `piecesText` is the same thing as
+ * plain lines ("Brand | Name | Price"), the shape the editor's own Content
+ * panel writes — either works, and a look with neither gets a placeholder
+ * set of three to replace. `looks` can grow to any length — adding more
+ * never changes how many read as "in view" at once (see `FALLOFF_RINGS`),
+ * it only gives the carousel more to turn through.
  */
 
 /* ---------------------------------------------------------------- constants */
@@ -105,7 +109,7 @@ const MODEL = (n) => `https://reel-ref-try-the-look.vercel.app/assets/model-${n}
 export const DEFAULT_LOOKS = [
   {
     label: "Street",
-    image: MODEL(1),
+    src: MODEL(1),
     pieces: [
       { brand: "Nike", name: "Oversized Hoodie", price: 118, color: "#3F4A3A" },
       { brand: "Nikey", name: "Baggy Denim", price: 96, color: "#8CA0C4" },
@@ -114,7 +118,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Off Duty",
-    image: MODEL(2),
+    src: MODEL(2),
     pieces: [
       { brand: "Nike", name: "Boxy Tee", price: 59, color: "#16181B" },
       { brand: "Nikey", name: "Relaxed Jeans", price: 92, color: "#A9C2D9" },
@@ -123,7 +127,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Game Day",
-    image: MODEL(3),
+    src: MODEL(3),
     pieces: [
       { brand: "Nike", name: "Varsity Jacket", price: 168, color: "#8A8F99" },
       { brand: "Nikey", name: "Track Pant", price: 84, color: "#1F2327" },
@@ -132,7 +136,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Weekend",
-    image: MODEL(4),
+    src: MODEL(4),
     pieces: [
       { brand: "Nike", name: "Half Zip Pullover", price: 110, color: "#6F7A82" },
       { brand: "Nikey", name: "Wide Chino", price: 88, color: "#C8BBA0" },
@@ -141,7 +145,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Studio Day",
-    image: MODEL(5),
+    src: MODEL(5),
     pieces: [
       { brand: "Nike", name: "Sweatshirt", price: 199, color: "#D9CDBF" },
       { brand: "Nikey", name: "Tatum 5 Orbit", price: 149, color: "#1A1A1C" },
@@ -150,7 +154,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Night Out",
-    image: MODEL(6),
+    src: MODEL(6),
     pieces: [
       { brand: "Nike", name: "Tech Fleece Jacket", price: 185, color: "#15171A" },
       { brand: "Nikey", name: "Slim Joggers", price: 95, color: "#2E323A" },
@@ -159,7 +163,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "City Walk",
-    image: MODEL(7),
+    src: MODEL(7),
     pieces: [
       { brand: "Nike", name: "Utility Vest", price: 128, color: "#5B6350" },
       { brand: "Nikey", name: "Cargo Pant", price: 98, color: "#8A7B63" },
@@ -168,7 +172,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Date Night",
-    image: MODEL(8),
+    src: MODEL(8),
     pieces: [
       { brand: "Nike", name: "Knit Polo", price: 88, color: "#2B2420" },
       { brand: "Nikey", name: "Tailored Trouser", price: 112, color: "#3A3F46" },
@@ -177,7 +181,7 @@ export const DEFAULT_LOOKS = [
   },
   {
     label: "Travel Day",
-    image: MODEL(9),
+    src: MODEL(9),
     pieces: [
       { brand: "Nike", name: "Packable Jacket", price: 135, color: "#4C5A63" },
       { brand: "Nikey", name: "Tech Jogger", price: 90, color: "#2E2E2E" },
@@ -222,7 +226,7 @@ const shapeByRing = (at, rings) => {
  * 60; only how far it has to turn to reach a distant one changes, not how
  * many read as "in view" at a time.
  */
-function applyFrame(rotY, live, cardEls, mirrorEls) {
+function applyFrame(rotY, live, cardEls, mirrorEls, viewEls) {
   if (!live) return;
   const { box, narrow, spacing, cardScale, n, stepAngle } = live;
   const stageW = (box.w || 600) - (narrow ? 0 : 340);
@@ -265,16 +269,29 @@ function applyFrame(rotY, live, cardEls, mirrorEls) {
     // own card tucked behind the 3rd one, not a copy riding on it.
     const mirrorX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
     const gray = clamp(backness * 0.55, 0, 0.55).toFixed(3);
+    // A ground shadow that fades in continuously with `eased`, not an
+    // instant on/off switch tied to which look was *clicked* — a card
+    // that's been chosen but hasn't visually arrived yet is still, for a
+    // moment, the faint, blurred one it was a second ago, and a crisp
+    // shadow stamped onto that reads as broken, not "this one's next".
+    const shadowAlpha = (eased * 0.22).toFixed(3);
 
     const el = cardEls[i];
     if (el) {
       el.style.width = `${cardW}px`;
       el.style.height = `${cardH}px`;
       el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
-      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray})`;
+      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray}) drop-shadow(0 ${(18 * eased).toFixed(1)}px ${(26 * eased).toFixed(1)}px rgba(0,0,0,${shadowAlpha}))`;
       el.style.opacity = opacity.toFixed(3);
       el.style.zIndex = String(Math.round(eased * 1000) + 10);
     }
+    // The "VIEW" pin only ever reads as attached to the one card that has
+    // actually, visually arrived at centre — faded in over the last stretch
+    // of its approach — never the one merely *chosen* a moment ago and
+    // still travelling, which is what let it show up stamped on a still-far,
+    // still-blurred card during a fast run of clicks.
+    const vEl = viewEls[i];
+    if (vEl) vEl.style.opacity = clamp((eased - 0.85) / 0.15, 0, 1).toFixed(3);
     const mEl = mirrorEls[i];
     if (mEl) {
       mEl.style.width = `${cardW}px`;
@@ -286,8 +303,40 @@ function applyFrame(rotY, live, cardEls, mirrorEls) {
   }
 }
 
+// A new look (added blank from the editor's Content panel) gets this to
+// replace, rather than opening on an empty piece list.
+const PLACEHOLDER_PIECES = [
+  { brand: "Nike", name: "Essential Tee", price: 59 },
+  { brand: "Nikey", name: "Relaxed Pant", price: 89 },
+  { brand: "Nike", name: "Everyday Sneaker", price: 119 },
+];
+
+/** The editor's Content panel writes a piece list as plain lines, one piece
+ * each — "Brand | Name | Price" — since it has no field type for a list of
+ * structured records. Blank or malformed parts fall back sensibly rather
+ * than breaking the row. */
+function parsePiecesText(text) {
+  return String(text || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l, i) => {
+      const [brand, name, price] = l.split("|").map((s) => s.trim());
+      return {
+        brand: brand || "Nike",
+        name: name || `Piece ${i + 1}`,
+        price: Number.parseFloat(String(price).replace(/[^0-9.]/g, "")) || 0,
+      };
+    });
+}
+
+const piecesToText = (pieces) =>
+  (Array.isArray(pieces) ? pieces : [])
+    .map((p) => `${p?.brand ?? "Nike"} | ${p?.name ?? ""} | ${p?.price ?? 0}`)
+    .join("\n");
+
 function normPieces(pieces) {
-  if (!Array.isArray(pieces)) return [];
+  if (!Array.isArray(pieces) || !pieces.length) return [];
   return pieces.map((p, i) => ({
     brand: String(p?.brand ?? "Nike"),
     name: String(p?.name ?? `Piece ${i + 1}`),
@@ -298,10 +347,18 @@ function normPieces(pieces) {
 
 function normLook(entry, i, fallbackImage) {
   const base = entry && typeof entry === "object" ? entry : {};
+  // `pieces` (an array, for programmatic use) wins over `piecesText` (plain
+  // lines, what the editor's Content panel writes); neither present gets a
+  // placeholder set to replace, rather than an empty list.
+  const pieces = Array.isArray(base.pieces) && base.pieces.length
+    ? base.pieces
+    : base.piecesText
+      ? parsePiecesText(base.piecesText)
+      : PLACEHOLDER_PIECES;
   return {
     label: String(base.label ?? `Look ${i + 1}`),
-    image: base.image || fallbackImage,
-    pieces: normPieces(base.pieces),
+    image: base.src || base.image || fallbackImage,
+    pieces: normPieces(pieces),
   };
 }
 
@@ -402,6 +459,11 @@ export default function TryTheLook({
 
   const isControlled = controlledIndex != null;
   const startActive = clamp(defaultActiveIndex ?? Math.min(4, n - 1), 0, Math.max(0, n - 1));
+  // The number shown under each look is relative to whichever one starts in
+  // focus, not raw array order — that one reads "01", and the count carries
+  // on to its right (wrapping back round through the left side last), fixed
+  // from the start rather than shuffling every time the active one changes.
+  const numberOf = (i) => (mod(i - startActive, n) + 1).toString().padStart(2, "0");
   // `activeState` is a normal React value — read for the sidebar, the nav
   // and which card is "active" — and only ever changes once per click, so it
   // re-renders cheaply. The ring's actual turn, in degrees, lives outside
@@ -428,6 +490,25 @@ export default function TryTheLook({
   // straight to these every tick instead of going through React.
   const cardElsRef = useRef([]);
   const mirrorElsRef = useRef([]);
+  const viewElsRef = useRef([]);
+  // A stable setter function per index, cached rather than written inline —
+  // an inline `(el) => ...` is a new function every render, so React would
+  // treat the ref as "changed" on every single click (anything that updates
+  // `activeState` re-renders this component) and detach-then-reattach every
+  // card's DOM node right as it's mid-turn. That brief detach is where a
+  // card's position could be read as stale by the very next animation frame
+  // — rare enough to look like an occasional skipped beat rather than a
+  // crash, but worse the faster someone clicks through. A setter that's the
+  // same function across renders is never seen as "changed" at all.
+  const cardSettersRef = useRef([]);
+  const mirrorSettersRef = useRef([]);
+  const viewSettersRef = useRef([]);
+  const cardSetter = (i) =>
+    cardSettersRef.current[i] || (cardSettersRef.current[i] = (el) => (cardElsRef.current[i] = el));
+  const mirrorSetter = (i) =>
+    mirrorSettersRef.current[i] || (mirrorSettersRef.current[i] = (el) => (mirrorElsRef.current[i] = el));
+  const viewSetter = (i) =>
+    viewSettersRef.current[i] || (viewSettersRef.current[i] = (el) => (viewElsRef.current[i] = el));
 
   useEffect(() => {
     const el = rootRef.current;
@@ -447,8 +528,26 @@ export default function TryTheLook({
   const spin = (steps) => {
     if (!steps) return;
     const nextActive = mod(activeRef.current + steps, n);
-    const from = rotYRef.current;
-    const to = from - steps * stepAngle;
+    // Bled back toward 0 by whole laps before use — rotY is free to run up
+    // over a long session (thousands of clicks, autoplay left running for
+    // hours), and every formula below is exactly as periodic in 360° as the
+    // ring itself, so this never changes a single card's position; it only
+    // keeps the numbers small so nothing downstream ever has to deal with
+    // an oversized angle that stops reading as "perfect" through sheer
+    // floating-point distance from zero.
+    const from = rotYRef.current - Math.round(rotYRef.current / 360) * 360;
+    // The one rotY that puts `nextActive` dead centre — fixed by its index
+    // alone, never by how this turn started — nudged by whichever whole lap
+    // keeps it closest to `from`, so the turn still takes the short way
+    // round. Clicking again before a turn settles used to carry forward
+    // however far that turn had *actually* gotten, which is no longer a
+    // round multiple of a step away from centred — so the next turn, built
+    // on top of it, would land short of centre by exactly that much. This
+    // always targets the one true centred angle for the index, so however
+    // many turns get interrupted in a row, the one that's finally allowed
+    // to finish always lands dead on.
+    const centered = -nextActive * stepAngle;
+    const to = centered + Math.round((from - centered) / 360) * 360;
     // A card three rings out has three times as far to travel as one ring
     // out — given proportionally more time too, so every click reads as the
     // same steady speed of turn, not a rushed one the further the clicked
@@ -478,10 +577,10 @@ export default function TryTheLook({
         rotYRef.current = anim.from + (anim.to - anim.from) * EASE(t);
         if (t >= 1) animRef.current = null;
       }
-      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current);
+      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current);
       raf = requestAnimationFrame(frame);
     };
-    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current);
+    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current);
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -580,7 +679,7 @@ export default function TryTheLook({
                 {/* the mirrored echo at the opposite edge — only visible at all
                     once this card is the one furthest round the turn */}
                 <div
-                  ref={(el) => (mirrorElsRef.current[i] = el)}
+                  ref={mirrorSetter(i)}
                   aria-hidden="true"
                   style={{ ...baseStyle, pointerEvents: "none", zIndex: 1 }}
                 >
@@ -602,7 +701,7 @@ export default function TryTheLook({
                 </div>
 
                 <button
-                  ref={(el) => (cardElsRef.current[i] = el)}
+                  ref={cardSetter(i)}
                   type="button"
                   onClick={() => handlePick(i)}
                   aria-label={`Show the ${look.label} look`}
@@ -628,37 +727,40 @@ export default function TryTheLook({
                       objectPosition: "50% 100%",
                       userSelect: "none",
                       pointerEvents: "none",
-                      filter: isActive
-                        ? "drop-shadow(0 18px 26px rgba(0,0,0,0.22))"
-                        : "none",
                     }}
                   />
-                  {isActive && (
-                    <span
-                      style={{
-                        position: "absolute",
-                        left: "50%",
-                        bottom: "42%",
-                        transform: "translate(-50%, 50%)",
-                        width: 64,
-                        height: 64,
-                        borderRadius: "50%",
-                        background: "rgba(255,255,255,0.55)",
-                        backdropFilter: "blur(2px)",
-                        border: "1px solid rgba(0,0,0,0.12)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 11,
-                        letterSpacing: "0.08em",
-                        fontWeight: 600,
-                        color: "#111",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      VIEW
-                    </span>
-                  )}
+                  {/* Always mounted, never conditional on `isActive` — that flips
+                      the instant a card is clicked, long before it's visually
+                      arrived at centre. Its opacity is set continuously by
+                      `applyFrame`, from the same "how close to front" value as
+                      everything else, so it only ever reads as attached to
+                      whichever card is actually, visually there. */}
+                  <span
+                    ref={viewSetter(i)}
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      bottom: "42%",
+                      transform: "translate(-50%, 50%)",
+                      width: 64,
+                      height: 64,
+                      borderRadius: "50%",
+                      background: "rgba(255,255,255,0.55)",
+                      backdropFilter: "blur(2px)",
+                      border: "1px solid rgba(0,0,0,0.12)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 11,
+                      letterSpacing: "0.08em",
+                      fontWeight: 600,
+                      color: "#111",
+                      pointerEvents: "none",
+                      opacity: 0,
+                    }}
+                  >
+                    VIEW
+                  </span>
                 </button>
               </Fragment>
             );
@@ -722,7 +824,7 @@ export default function TryTheLook({
                       fontWeight: isActive ? 600 : 400,
                     }}
                   >
-                    {String(i + 1).padStart(2, "0")}
+                    {numberOf(i)}
                     {isActive ? `  ${look.label}` : ""}
                   </div>
                 </button>
