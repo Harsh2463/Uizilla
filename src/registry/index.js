@@ -13,6 +13,7 @@ import zoomGallery from "../library/zoom-gallery/meta.jsx";
 import spiralImages from "../library/spiral-images/meta.jsx";
 import spotlightFrames from "../library/spotlight-frames/meta.jsx";
 import clothingFlip from "../library/clothing-flip/meta.jsx";
+import tryTheLook from "../library/try-the-look/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -27,6 +28,7 @@ export const components = [
   zoomGallery,
   spiralImages,
   spotlightFrames,
+  tryTheLook,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
