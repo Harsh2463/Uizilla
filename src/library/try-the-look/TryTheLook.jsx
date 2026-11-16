@@ -226,7 +226,7 @@ const shapeByRing = (at, rings) => {
  * 60; only how far it has to turn to reach a distant one changes, not how
  * many read as "in view" at a time.
  */
-function applyFrame(rotY, live, cardEls, mirrorEls, viewEls) {
+function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls) {
   // However it happened, a non-finite angle must never be written into a
   // style — that's what a genuinely broken frame (every card's `transform`
   // literally the string "NaN") would look like. Leaving the last good
@@ -275,21 +275,33 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls) {
     // own card tucked behind the 3rd one, not a copy riding on it.
     const mirrorX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
     const gray = clamp(backness * 0.55, 0, 0.55).toFixed(3);
-    // A ground shadow that fades in continuously with `eased`, not an
-    // instant on/off switch tied to which look was *clicked* — a card
-    // that's been chosen but hasn't visually arrived yet is still, for a
-    // moment, the faint, blurred one it was a second ago, and a crisp
-    // shadow stamped onto that reads as broken, not "this one's next".
-    const shadowAlpha = (eased * 0.22).toFixed(3);
 
     const el = cardEls[i];
     if (el) {
       el.style.width = `${cardW}px`;
       el.style.height = `${cardH}px`;
       el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
-      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray}) drop-shadow(0 ${(18 * eased).toFixed(1)}px ${(26 * eased).toFixed(1)}px rgba(0,0,0,${shadowAlpha}))`;
+      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray})`;
       el.style.opacity = opacity.toFixed(3);
       el.style.zIndex = String(Math.round(eased * 1000) + 10);
+    }
+    // A flat ellipse of shadow sitting on the ground under each character's
+    // own feet — not a silhouette-shaped drop-shadow riding on the photo
+    // itself — so it reads as contact with the floor, not an outline. It
+    // shares the card's `x`/`z` (the same spot on the ground) and fades in
+    // with `eased` the same way everything else does, but never lifts —
+    // the shadow stays put on the floor while the character rises off it.
+    const sEl = shadowEls[i];
+    if (sEl) {
+      // Height comes from the *old*, narrower width — only the width itself
+      // (and how dark it reads) grows, so a wider shadow still stays just
+      // as flat rather than ballooning into an oval.
+      const shadowH = cardW * 0.46 * scale * 0.22;
+      const shadowW = cardW * 0.74 * scale;
+      sEl.style.width = `${shadowW}px`;
+      sEl.style.height = `${shadowH.toFixed(1)}px`;
+      sEl.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateZ(${z.toFixed(1)}px)`;
+      sEl.style.opacity = (opacity * 0.75).toFixed(3);
     }
     // The "VIEW" pin only ever reads as attached to the one card that has
     // actually, visually arrived at centre — faded in over the last stretch
@@ -497,6 +509,7 @@ export default function TryTheLook({
   const cardElsRef = useRef([]);
   const mirrorElsRef = useRef([]);
   const viewElsRef = useRef([]);
+  const shadowElsRef = useRef([]);
   // A stable setter function per index, cached rather than written inline —
   // an inline `(el) => ...` is a new function every render, so React would
   // treat the ref as "changed" on every single click (anything that updates
@@ -509,12 +522,15 @@ export default function TryTheLook({
   const cardSettersRef = useRef([]);
   const mirrorSettersRef = useRef([]);
   const viewSettersRef = useRef([]);
+  const shadowSettersRef = useRef([]);
   const cardSetter = (i) =>
     cardSettersRef.current[i] || (cardSettersRef.current[i] = (el) => (cardElsRef.current[i] = el));
   const mirrorSetter = (i) =>
     mirrorSettersRef.current[i] || (mirrorSettersRef.current[i] = (el) => (mirrorElsRef.current[i] = el));
   const viewSetter = (i) =>
     viewSettersRef.current[i] || (viewSettersRef.current[i] = (el) => (viewElsRef.current[i] = el));
+  const shadowSetter = (i) =>
+    shadowSettersRef.current[i] || (shadowSettersRef.current[i] = (el) => (shadowElsRef.current[i] = el));
 
   useEffect(() => {
     const el = rootRef.current;
@@ -598,10 +614,10 @@ export default function TryTheLook({
         rotYRef.current = anim.from + (anim.to - anim.from) * EASE(t);
         if (t >= 1) animRef.current = null;
       }
-      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current);
+      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current);
       raf = requestAnimationFrame(frame);
     };
-    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current);
+    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current);
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -697,6 +713,26 @@ export default function TryTheLook({
             };
             return (
               <Fragment key={i}>
+                {/* a flat ellipse of ground contact shadow under this card's
+                    own feet, sized/placed/faded by `applyFrame` the same way
+                    the card itself is — not a shadow riding on the photo */}
+                <div
+                  ref={shadowSetter(i)}
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    bottom: 2,
+                    transformOrigin: "50% 50%",
+                    borderRadius: "50%",
+                    background:
+                      "radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.32) 55%, rgba(0,0,0,0) 80%)",
+                    filter: "blur(4px)",
+                    pointerEvents: "none",
+                    zIndex: 0,
+                  }}
+                />
+
                 {/* the mirrored echo at the opposite edge — only visible at all
                     once this card is the one furthest round the turn */}
                 <div
