@@ -110,7 +110,7 @@ export default {
     ["edgeWidth", "number", "14", "How deep the moving band reaches into the figure, as a percentage of the image width (1–60). It fades out toward the inside."],
     ["edgeMotion", "number", "50", "How far the edge particles travel (0–100)."],
     ["paper / glow / ink / accent", "string", "near-black / light brown / warm white / burnt orange", "Base background, the radial glow that rises from the bottom edge and fades into it, text colour, and the colour of the filled buttons. Use #rgb or #rrggbb so the glow can be tinted."],
-    ["narrowAt", "number", "760", "Container width in px below which a portrait-shaped hero switches to its stacked layout. A small landscape box keeps the wide layout, scaled down."],
+    ["narrowAt", "number", "900", "Container width in px below which a portrait-shaped hero switches to its stacked layout. A small landscape box keeps the wide layout, scaled down."],
     ["interactive", "boolean", "true", "Turn off the cursor interaction (used for the static home-page card)."],
     ["onCta", "() => void", "undefined", "Called by the nav button and the small round buttons on the stat cards."],
     ["style", "CSSProperties", "{}", "Extra styles for the outer wrapper."],

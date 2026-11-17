@@ -61,6 +61,9 @@ const FIELD_FILL = 0.7;
 
 const DESIGN_W = 1400;
 const DESIGN_W_NARROW = 520;
+const FIT_FLOOR = 0.8; // smallest the picture gets, as a share of the hero height
+const NARROW_ART_DROP = 170; // px the picture is pushed down in the stacked layout
+const GHOST_PAD_NARROW = 34; // px kept clear either side of the ghost word there
 /** The shortest the stage is ever laid out at. In a box shorter than this the
  * hero scales down to fit rather than squeezing the copy into the space and
  * leaving the art with none — in a short enough box the art would otherwise
@@ -939,7 +942,7 @@ export default function ParticleHero({
   ink = "#F7EDE4",
   accent = "#D9480F",
   glow = "#C2521A",
-  narrowAt = 760,
+  narrowAt = 900,
   interactive = true,
   onCta,
   style = {},
@@ -997,8 +1000,13 @@ export default function ParticleHero({
   // Stacked only when the box is both narrow and (roughly) portrait. A small
   // but landscape box, like a thumbnail card, keeps the wide composition and
   // simply scales it down.
-  const narrow = box.w > 0 && box.w < narrowAt && box.h > box.w * 0.9;
-  const designW = narrow ? DESIGN_W_NARROW : DESIGN_W;
+  const narrow = box.w > 0 && box.w < narrowAt && box.h > box.w * 1.15;
+  // Stacked: 520 wide at minimum, but a box that is wider than that at the
+  // same scale (a tablet) gets a wider stage, so the picture runs edge to edge
+  // instead of ending in hard vertical cuts either side of a centred column.
+  const designW = narrow
+    ? Math.max(DESIGN_W_NARROW, box.w / Math.min(box.w / DESIGN_W_NARROW, box.h / MIN_STAGE_H_NARROW))
+    : DESIGN_W;
   // One scale for the whole hero: lay it out at a fixed design width, then
   // shrink it into whatever box it was given. Every size below is design px.
   const minStageH = narrow ? MIN_STAGE_H_NARROW : MIN_STAGE_H;
@@ -1028,12 +1036,48 @@ export default function ParticleHero({
   const fsRatio = aspect || 16 / 9;
   const canvasAspect = designW / stageH;
   const fsCover = narrow || imageFit === "cover";
+  // In a squarish box "contain" would shrink the figure to a sliver, so it
+  // never drops below FIT_FLOOR of the hero height; the shift below then keeps
+  // the figure itself inside the frame.
   const fitScale = fsCover
     ? Math.max(1, canvasAspect / fsRatio)
-    : Math.min(1, canvasAspect / fsRatio);
+    : Math.max(FIT_FLOOR, Math.min(1, canvasAspect / fsRatio));
   const fsScale = fitScale * clamp(imageZoom, 0.3, 2.5);
-  const fsShiftX = narrow ? 0 : clamp(imageOffsetX, -60, 60);
-  const fsShiftY = clamp(imageOffsetY, -60, 60);
+  // Width of the picture as a share of the hero, and the furthest right it can
+  // be pushed before the figure (which fills the right ~40% of the picture)
+  // would run off the edge.
+  const imgWPct = fitScale * clamp(imageZoom, 0.3, 2.5) * (fsRatio / canvasAspect) * 100;
+  const fsShiftX = narrow ? 0 : Math.min(clamp(imageOffsetX, -60, 60), 58 - 0.42 * imgWPct);
+  // Stacked: the ghost word runs the full width right under the nav, and the
+  // picture is pushed down (in design px, so it holds on any phone height)
+  // until the helmet starts below the word instead of covering it.
+  const fsShiftY = narrow
+    ? ((NARROW_ART_DROP + (clamp(imageOffsetY, -60, 60) - 5) * 4) / Math.max(1, stageH)) * 100
+    : (() => {
+        // When the picture is shorter than the hero (a squarish box), slide it
+        // down until its bottom meets the hero's bottom, where the fog takes over.
+        const y = clamp(imageOffsetY, -60, 60);
+        const bottom = 50 + y + fitScale * clamp(imageZoom, 0.3, 2.5) * 50;
+        return y + Math.max(0, 100 - bottom);
+      })();
+
+  // Stacked layout: size the ghost word so it spans (almost) the whole width,
+  // whatever the word is. Measured at a known size, then scaled to fit.
+  const ghostRef = useRef(null);
+  const [ghostFit, setGhostFit] = useState(0);
+  useLayoutEffect(() => {
+    if (!narrow) return;
+    const el = ghostRef.current;
+    if (!el) return;
+    const measure = () => {
+      el.style.fontSize = "100px";
+      const w = el.offsetWidth;
+      el.style.fontSize = "";
+      if (w > 0) setGhostFit(clamp(((designW - 2 * GHOST_PAD_NARROW) * 100) / w, 60, 420));
+    };
+    measure();
+    document.fonts?.ready?.then(measure);
+  }, [narrow, ghostWord, designW]);
 
   const statList = parseStats(stats);
   const linkList = Array.isArray(links) ? links.filter(Boolean) : [];
@@ -1159,14 +1203,14 @@ export default function ParticleHero({
           style={{
             position: "absolute",
             zIndex: 0,
-            top: narrow ? 100 : 38,
+            top: narrow ? 70 : 38,
             left: 0,
             right: 0,
             textAlign: "center",
             // Cancels the trailing letter-space so the glyphs, not the box,
             // end up centred.
             textIndent: "-0.0627em",
-            fontSize: narrow ? 160 : designW * 0.31,
+            fontSize: narrow ? ghostFit || 160 : designW * 0.31,
             fontWeight: 700,
             lineHeight: 0.8,
             letterSpacing: "-0.09em",
@@ -1176,7 +1220,7 @@ export default function ParticleHero({
             whiteSpace: "nowrap",
           }}
         >
-          {ghostWord}
+          <span ref={ghostRef} style={{ display: "inline-block", letterSpacing: "-0.09em" }}>{ghostWord}</span>
         </div>
 
         {/* --------------------------------------------------------- visual */}
