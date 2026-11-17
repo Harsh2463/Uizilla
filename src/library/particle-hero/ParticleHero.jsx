@@ -139,6 +139,7 @@ attribute vec4 a_color;
 attribute vec2 a_uv;
 attribute vec3 a_random;
 attribute vec4 a_home;
+attribute vec2 a_edge;
 varying vec4 v_color;
 uniform sampler2D u_posTex;
 uniform float u_static;
@@ -151,6 +152,10 @@ uniform vec2 u_jitterAxis;
 uniform float u_jitterSpeed;
 uniform float u_brushSize;
 uniform float u_aspect;
+uniform float u_edgeOn;
+uniform float u_edgeWidth;
+uniform float u_edgeSide;
+uniform float u_edgeAmp;
 
 vec4 fetchState() {
     if (u_static > 0.5) return vec4(a_home.rg * u_imageScale, 0.0, 0.0);
@@ -185,6 +190,25 @@ void main() {
     float orbitRadius = u_brushSize * 0.1 * (energy / 2.5);
     offset += orbit * orbitRadius * (0.2 + a_random.x * 1.8);
 
+    // Always-on band along the silhouette's edge: each dot there shimmers in
+    // place and streams outward, fading as it goes, whether or not the cursor
+    // is near. Everything outside the band stays at rest.
+    if (u_edgeOn > 0.5) {
+        float er = 1.0 - smoothstep(0.0, u_edgeWidth, a_edge.x);
+        float el = 1.0 - smoothstep(0.0, u_edgeWidth, a_edge.y);
+        float wr = (u_edgeSide < 1.5 || u_edgeSide > 2.5) ? er : 0.0;
+        float wl = u_edgeSide > 1.5 ? el : 0.0;
+        float bw = max(wr, wl);
+        if (bw > 0.001) {
+            float side = wr >= wl ? 1.0 : -1.0;
+            float ph = fract(u_time * (0.12 + a_random.y * 0.25) + a_random.x);
+            vec2 flow = vec2(side * ph * 1.4, (a_random.z - 0.5) * ph * 0.7);
+            vec2 shimmer = orbit * (0.25 + a_random.x * 0.75) * 0.35;
+            offset += (flow + shimmer) * u_edgeAmp * bw;
+            v_color.a *= 1.0 - ph * ph * bw * 0.85;
+        }
+    }
+
     vec2 pos = homeXY + offset;
     gl_PointSize = u_particleSize;
     gl_Position = vec4(pos.x / u_aspect, pos.y, 0.0, 1.0);
@@ -212,6 +236,7 @@ const DRAW_UNIFORMS = [
   "u_posTex", "u_static", "u_imageScale", "u_time", "u_particleSize",
   "u_baseJitter", "u_interJitter", "u_jitterAxis", "u_jitterSpeed",
   "u_brushSize", "u_alphaComp", "u_aspect",
+  "u_edgeOn", "u_edgeWidth", "u_edgeSide", "u_edgeAmp",
 ];
 
 /* ------------------------------------------------------------- GL utilities */
@@ -324,6 +349,21 @@ function makeBuilder(data, w, h, aspect, target) {
   const color = new Float32Array(capacity * 4);
   const uv = new Float32Array(capacity * 2);
   const rand = new Float32Array(capacity * 3);
+  const edge = new Float32Array(capacity * 2);
+
+  // Rightmost / leftmost opaque pixel of every row, so each particle can know
+  // how far it sits from the silhouette's edge (as a fraction of image width).
+  const rowR = new Int32Array(h).fill(-1);
+  const rowL = new Int32Array(h).fill(-1);
+  for (let r = 0; r < h; r++) {
+    const base = r * w * 4;
+    for (let x = w - 1; x >= 0; x--) {
+      if (data[base + x * 4 + 3] >= ALPHA_FLOOR) { rowR[r] = x; break; }
+    }
+    for (let x = 0; x < w; x++) {
+      if (data[base + x * 4 + 3] >= ALPHA_FLOOR) { rowL[r] = x; break; }
+    }
+  }
 
   let count = 0;
   let y = 0;
@@ -356,6 +396,8 @@ function makeBuilder(data, w, h, aspect, target) {
           rand[i3] = Math.random();
           rand[i3 + 1] = Math.random();
           rand[i3 + 2] = Math.random();
+          edge[i2] = (rowR[iy] - x) / w;
+          edge[i2 + 1] = (x - rowL[iy]) / w;
           uv[i2] = ((count % texSize) + 0.5) / texSize;
           uv[i2 + 1] = (Math.floor(count / texSize) + 0.5) / texSize;
           count++;
@@ -367,7 +409,7 @@ function makeBuilder(data, w, h, aspect, target) {
       return finished;
     },
     result() {
-      return { home, color, uv, rand, count, texSize, gridStep: step, srcH: h };
+      return { home, color, uv, rand, edge, count, texSize, gridStep: step, srcH: h };
     },
   };
 }
@@ -392,6 +434,7 @@ function ParticleField({
   imageScale,
   stageScale,
   interactive,
+  edge,
   onAspect,
   eventsRef,
 }) {
@@ -427,6 +470,7 @@ function ParticleField({
     density: effectiveDensity,
     stageScale,
     interactive,
+    edge,
   };
 
   // Read the image's pixels once. Canvas reads are blocked for a cross-origin
@@ -491,6 +535,7 @@ function ParticleField({
       uv: gl.getAttribLocation(draw.prog, "a_uv"),
       random: gl.getAttribLocation(draw.prog, "a_random"),
       home: gl.getAttribLocation(draw.prog, "a_home"),
+      edge: gl.getAttribLocation(draw.prog, "a_edge"),
       quad: sim.prog ? gl.getAttribLocation(sim.prog, "a_quad") : -1,
     };
 
@@ -510,6 +555,7 @@ function ParticleField({
     const bufUv = gl.createBuffer();
     const bufRandom = gl.createBuffer();
     const bufHome = gl.createBuffer();
+    const bufEdge = gl.createBuffer();
 
     let builtKey = "";
     let pendingKey = "";
@@ -549,6 +595,8 @@ function ParticleField({
       gl.bufferData(gl.ARRAY_BUFFER, r.uv.subarray(0, count * 2), gl.STATIC_DRAW);
       gl.bindBuffer(gl.ARRAY_BUFFER, bufRandom);
       gl.bufferData(gl.ARRAY_BUFFER, r.rand.subarray(0, count * 3), gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, bufEdge);
+      gl.bufferData(gl.ARRAY_BUFFER, r.edge.subarray(0, count * 2), gl.STATIC_DRAW);
       if (!floatRT) {
         gl.bindBuffer(gl.ARRAY_BUFFER, bufHome);
         gl.bufferData(gl.ARRAY_BUFFER, r.home.subarray(0, count * 4), gl.STATIC_DRAW);
@@ -740,9 +788,20 @@ function ParticleField({
       gl.uniform2f(draw.u.u_jitterAxis, JITTER_X, JITTER_Y);
       gl.uniform1f(draw.u.u_jitterSpeed, L.jitterSpeed);
       gl.uniform1f(draw.u.u_brushSize, L.brush);
+      const E = L.edge || {};
+      gl.uniform1f(draw.u.u_edgeOn, E.on ? 1 : 0);
+      gl.uniform1f(draw.u.u_edgeWidth, E.width || 0.1);
+      gl.uniform1f(draw.u.u_edgeSide, E.side || 1);
+      gl.uniform1f(draw.u.u_edgeAmp, E.amp || 0);
 
       const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP) * Math.max(0.1, L.stageScale || 1);
-      const pointPx = L.particleSize * dpr * Math.max(1, cssW / 1200);
+      let pointPx = L.particleSize * dpr * Math.max(1, cssW / 1200);
+      // Never let a dot be smaller than the gap to its neighbour, or on a
+      // small screen the background shows through as a faint regular grid.
+      if (pointPx > 0 && gridStep > 0) {
+        const spacingPx = (gridStep * L.imageScale * canvas.height) / Math.max(1, srcH);
+        pointPx = Math.max(pointPx, spacingPx * 1.6);
+      }
       gl.uniform1f(draw.u.u_particleSize, pointPx);
       gl.uniform1f(
         draw.u.u_alphaComp,
@@ -758,6 +817,11 @@ function ParticleField({
       gl.bindBuffer(gl.ARRAY_BUFFER, bufRandom);
       gl.enableVertexAttribArray(attrs.random);
       gl.vertexAttribPointer(attrs.random, 3, gl.FLOAT, false, 0, 0);
+      if (attrs.edge >= 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufEdge);
+        gl.enableVertexAttribArray(attrs.edge);
+        gl.vertexAttribPointer(attrs.edge, 2, gl.FLOAT, false, 0, 0);
+      }
       if (attrs.home >= 0) {
         if (floatRT) {
           gl.disableVertexAttribArray(attrs.home);
@@ -855,6 +919,10 @@ export default function ParticleHero({
   imageOffsetX = 25,
   imageOffsetY = 5,
   imageFill = FIELD_FILL,
+  edgeParticles = true,
+  edgeSide = "right",
+  edgeWidth = 14,
+  edgeMotion = 50,
   paper = "#EBE8E7",
   ink = "#0D0D0D",
   accent = "#0D0D0D",
@@ -869,6 +937,15 @@ export default function ParticleHero({
   const [band, setBand] = useState({ w: 0, h: 0 });
   const [aspect, setAspect] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
+  const edge = useMemo(
+    () => ({
+      on: !!edgeParticles,
+      side: edgeSide === "left" ? 2 : edgeSide === "both" ? 3 : 1,
+      width: Math.max(1, Math.min(60, edgeWidth)) / 100,
+      amp: (Math.max(0, Math.min(100, edgeMotion)) / 100) * 0.16,
+    }),
+    [edgeParticles, edgeSide, edgeWidth, edgeMotion]
+  );
 
   useLayoutEffect(() => {
     const el = rootRef.current;
@@ -1112,6 +1189,7 @@ export default function ParticleHero({
               imageScale={fsScale}
               stageScale={s}
               interactive={interactive}
+              edge={edge}
               onAspect={setAspect}
               eventsRef={rootRef}
             />
@@ -1146,6 +1224,7 @@ export default function ParticleHero({
                   imageScale={fill}
                   stageScale={s}
                   interactive={interactive}
+                  edge={edge}
                   onAspect={setAspect}
                   eventsRef={rootRef}
                 />
