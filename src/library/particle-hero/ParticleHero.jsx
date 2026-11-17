@@ -935,10 +935,10 @@ export default function ParticleHero({
   edgeSide = "right",
   edgeWidth = 14,
   edgeMotion = 50,
-  paper = "#1A0B05",
+  paper = "#030201",
   ink = "#F7EDE4",
   accent = "#D9480F",
-  glow = "#FF5B14",
+  glow = "#C2521A",
   narrowAt = 760,
   interactive = true,
   onCta,
@@ -1110,7 +1110,7 @@ export default function ParticleHero({
         boxSizing: "border-box",
         color: ink,
         fontFamily: FONT,
-        background: `radial-gradient(ellipse 78% 74% at 60% 50%, ${withAlpha(glow, 1)} 0%, ${withAlpha(glow, 0.55)} 42%, ${withAlpha(glow, 0.16)} 68%, transparent 88%), radial-gradient(ellipse 90% 42% at 40% 108%, ${withAlpha(glow, 0.5)} 0%, transparent 72%), ${paper}`,
+        background: `radial-gradient(ellipse 110% 80% at 50% 100%, ${withAlpha(glow, 1)} 0%, ${withAlpha(glow, 0.8)} 28%, ${withAlpha(glow, 0.46)} 55%, ${withAlpha(glow, 0.16)} 82%, transparent 100%), ${paper}`,
       }}
     >
       <div
@@ -1251,7 +1251,7 @@ export default function ParticleHero({
             the art fades into the page colour behind it. That keeps dark
             text readable on a dark picture, and hides the flat cut where a
             cropped render ends. */}
-        {fullscreen && narrow && (
+        {fullscreen && (
           <div
             aria-hidden="true"
             style={{
@@ -1260,8 +1260,8 @@ export default function ParticleHero({
               left: 0,
               right: 0,
               bottom: 0,
-              height: "52%",
-              background: `linear-gradient(to bottom, transparent 0%, ${paper} 62%)`,
+              height: narrow ? "52%" : "46%",
+              background: `linear-gradient(to bottom, transparent 0%, ${withAlpha(glow, 0.32)} 42%, ${withAlpha(glow, 0.78)} 76%, ${glow} 100%)`,
               pointerEvents: "none",
             }}
           />
