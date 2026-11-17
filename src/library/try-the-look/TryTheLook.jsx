@@ -18,10 +18,12 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
  * look that eases out on one side is the same look easing back in on the
  * other, not a copy jumping back to a start line.
  *
- * Clicking any character turns the ring the short way to bring it to front
- * and swaps the side panel to that look's pieces, bundle price and an
- * "Add full look to bag" button. An optional autoplay (▶) turns the ring on
- * its own. `spacing`, `cardScale`, `spinSeconds` and `autoplaySeconds` tune
+ * The carousel fills the whole component, with the heading as a giant,
+ * dimmed line behind the characters. Clicking any character turns the ring
+ * the short way to bring it to front and swaps the floating cards at the
+ * bottom-left to that look's pieces, bundle price and an "Add full look to
+ * bag" button. An optional `autoplay` turns the ring on its own, pausing on
+ * the first click. `spacing`, `cardScale`, `spinSeconds` and `autoplaySeconds` tune
  * how far apart the cards sit, how large they are, how smoothly a turn
  * settles, and how fast autoplay steps.
  *
@@ -58,17 +60,25 @@ const BACK_SCALE = 0.94;
 /** How many px a card rises as it eases out — a few pixels' difference by
  * how close it is to centre, not a size change. */
 const MAX_LIFT = 22;
+/** Width ÷ height of the character photos (the sample set is 640×1138).
+ * Each card's box uses the same proportion, so a photo fills its box's
+ * full height instead of being letterboxed by width. */
+const PHOTO_RATIO = 640 / 1138;
 /** How many px shorter a card stands per ring out — its height drops by
  * exactly this much for every full ring of distance, so standing order
  * reads straight off position/priority: whichever is front and centre is
  * always the tallest. */
 const HEIGHT_STEP_PX = 25;
-/** Blur (px) once a card has eased all the way to the edge; 0 at centre. */
-const MAX_BLUR = 8;
-/** Opacity once a card has eased all the way to the edge; 1 at centre. Kept
- * very low — at the far point of the turn a card should read as barely
- * there, almost lost into the white, not just "a bit faded". */
-const MIN_OPACITY = 0.04;
+/** Blur (px) once a card has eased all the way to the edge; 0 at centre.
+ * Lighter than it used to be — against a textured, busier backdrop a
+ * heavily blurred edge card read as a smear rather than a faded figure. */
+const MAX_BLUR = 4;
+/** Brightness (CSS `filter` units, 1 = unchanged) once a card has eased all
+ * the way to the edge; 1 at centre. Every card stays fully opaque — depth
+ * reads through blur and this dimming instead, so a far character is
+ * unmistakably still a character, just darker and softer, never faded
+ * toward invisible. */
+const MIN_BRIGHTNESS = 0.4;
 /** <1 keeps the near card (one step out) reading almost clear and only lets
  * the next one out (two steps) pick up real, visible blur — so the row goes
  * "near and clear" → "further and blurred" → "a ghost", rather than an even
@@ -246,11 +256,17 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
   // target from the clicked index alone, never from this `rotY` — heals it.
   if (!live || !Number.isFinite(rotY)) return;
   const { box, narrow, spacing, cardScale, n, stepAngle } = live;
-  const stageW = (box.w || 600) - (narrow ? 0 : 340);
-  const cardW = (narrow ? 120 : 170) * clamp(cardScale, 0.5, 1.8);
-  const cardH = (narrow ? 300 : 460) * clamp(cardScale, 0.5, 1.8);
+  // The carousel fills the whole component, so characters are sized off
+  // its height rather than a fixed pixel size. The box matches the photos'
+  // own proportion (PHOTO_RATIO) — a narrower box made `objectFit: contain`
+  // fit them by width, so they only ever reached ~2/3 of their height and
+  // left a dead band of empty backdrop above every head.
+  const stageW = box.w || 600;
+  const stageH = box.h || 600;
+  const cardH = clamp(stageH * (narrow ? 0.66 : 0.88), 260, 1400) * clamp(cardScale, 0.5, 1.8);
+  const cardW = cardH * PHOTO_RATIO;
   // The furthest a card ever eases out to, either side.
-  const edgeX = Math.max(60, stageW * 0.4) * clamp(spacing, 0.4, 2.2);
+  const edgeX = Math.max(60, stageW * 0.44) * clamp(spacing, 0.4, 2.2);
   // Never more rings than the ring actually has room for either side — so
   // a short ring (fewer looks than twice this) still fully fades out right
   // at its own wrap point, same as always, instead of still being half-lit
@@ -277,10 +293,11 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
     const scale = BACK_SCALE + (FRONT_SCALE - BACK_SCALE) * eased;
     const lift = (1 - eased) * MAX_LIFT;
     const blur = (1 - eased) * MAX_BLUR;
-    const opacity = MIN_OPACITY + (1 - MIN_OPACITY) * eased;
+    const bright = MIN_BRIGHTNESS + (1 - MIN_BRIGHTNESS) * eased;
     // Only the card nearest the far point of the turn ever shows a mirror at
-    // the opposite edge — a step or two out shows just its own side.
-    const mirrorOpacity = opacity * Math.pow(backness, MIRROR_POWER);
+    // the opposite edge — a step or two out shows just its own side. Tied
+    // to `backness` alone now, not an opacity that no longer fades.
+    const mirrorOpacity = Math.pow(backness, MIRROR_POWER);
     // The mirror's own resting spot — a little short of the edge, on
     // whichever side `x` isn't, not just `x` flipped, so it reads as its
     // own card tucked behind the 3rd one, not a copy riding on it. Nudged
@@ -318,8 +335,8 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
       el.style.width = `${cardWForRing.toFixed(1)}px`;
       el.style.height = `${cardHForRing.toFixed(1)}px`;
       el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
-      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray})`;
-      el.style.opacity = opacity.toFixed(3);
+      el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray}) brightness(${bright.toFixed(3)})`;
+      el.style.opacity = "1";
       el.style.zIndex = String(Math.round(eased * 1000) + 10);
     }
     // A flat ellipse of shadow sitting on the ground under each character's
@@ -338,7 +355,7 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
       sEl.style.width = `${shadowW}px`;
       sEl.style.height = `${shadowH.toFixed(1)}px`;
       sEl.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateZ(${z.toFixed(1)}px)`;
-      sEl.style.opacity = (opacity * 0.75).toFixed(3);
+      sEl.style.opacity = ((0.3 + 0.7 * eased) * 0.75).toFixed(3);
     }
     // The "VIEW" pin only ever reads as attached to the one card that has
     // actually, visually arrived at centre — faded in over the last stretch
@@ -472,11 +489,22 @@ export default function TryTheLook({
   spacing = 1,
   cardScale = 1,
   spinSeconds = 0.68,
-  sidebarCollapsible = true,
-  defaultSidebarOpen = true,
-  background = "#FFFFFF",
-  color = "#111111",
-  accent = "#111111",
+  background = `
+    radial-gradient(ellipse 80% 75% at 55% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 38%, rgba(25,0,0,0.42) 68%, rgba(8,0,0,0.88) 100%),
+    radial-gradient(ellipse 45% 50% at 6% 4%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 70%),
+    repeating-linear-gradient(90deg,
+      rgba(0,0,0,0.16) 0px,
+      rgba(0,0,0,0.16) 1px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0) 6px,
+      rgba(255,140,110,0.09) 7px,
+      rgba(0,0,0,0) 8px,
+      rgba(0,0,0,0) 12px
+    ),
+    radial-gradient(ellipse 70% 65% at 55% 48%, #F43E22 0%, #DC2A1A 28%, #A8180F 56%, #5C0B07 82%, #2A0504 100%)
+  `,
+  color = "#F6E9DE",
+  accent = "#FF5A32",
   onChange,
   onAddToBag,
   style,
@@ -516,12 +544,11 @@ export default function TryTheLook({
 
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [playing, setPlaying] = useState(autoplay);
-  const [sidebarOpen, setSidebarOpen] = useState(defaultSidebarOpen);
   const rootRef = useRef(null);
 
   const isControlled = controlledIndex != null;
   const startActive = clamp(defaultActiveIndex ?? Math.min(4, n - 1), 0, Math.max(0, n - 1));
-  // `activeState` is a normal React value — read for the sidebar, the nav
+  // `activeState` is a normal React value — read for the look's cards
   // and which card is "active" — and only ever changes once per click, so it
   // re-renders cheaply. The ring's actual turn, in degrees, lives outside
   // React entirely, in `rotYRef`: it only ever accumulates (never snapped
@@ -531,11 +558,6 @@ export default function TryTheLook({
   // drift out of step with itself and flicker. A short turn and a long one
   // now run the exact same way, just for proportionally longer.
   const [activeState, setActiveState] = useState(startActive);
-  // The number under each look is constant — 01 at whichever one starts
-  // active, counting up in plain increasing order to its right and
-  // wrapping back round through the rest last — fixed once at the start,
-  // never recomputed as the active one changes.
-  const numberOf = (i) => (mod(i - startActive, n) + 1).toString().padStart(2, "0");
   const activeRef = useRef(startActive);
   const rotYRef = useRef(-startActive * stepAngle);
   // The turn in flight, if any: eases rotYRef from `from` to `to` over
@@ -709,54 +731,97 @@ export default function TryTheLook({
     pickIndex(i);
   };
 
+  const pad = narrow ? 18 : 40;
+  // Sized so the one line spans most of the width, but never taller than a
+  // third of the stage — big enough to read as a backdrop, not a headline.
+  const headingSize = Math.max(40, Math.min((box.w || 800) * 0.112, (box.h || 600) * 0.3));
+  const bundleCard = (
+    <BundleCard
+      narrow={narrow}
+      bundleLabel={bundleLabel}
+      discounted={discounted}
+      total={total}
+      bundleDiscount={bundleDiscount}
+      accent={accent}
+      addToBagLabel={addToBagLabel}
+      onAdd={() => onAddToBag?.(current.pieces, null, current, active)}
+    />
+  );
+
   return (
     <div
       ref={rootRef}
       style={{
         ...style,
+        position: "relative",
         width: "100%",
         height: "100%",
         boxSizing: "border-box",
         background,
         color,
         fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
-        display: "flex",
-        flexDirection: narrow ? "column" : "row",
         overflow: "hidden",
       }}
     >
       {/* ------------------------------------------------------- the stage */}
+      {/* The carousel fills the whole component edge to edge; everything
+          else (copy, the look's cards) floats over it. */}
       <div
         style={{
-          position: "relative",
-          flex: "1 1 auto",
-          minWidth: 0,
+          position: "absolute",
+          inset: 0,
           display: "flex",
-          flexDirection: "column",
-          padding: narrow ? "28px 20px 16px" : "40px 24px 24px 48px",
+          alignItems: "flex-end",
+          justifyContent: "center",
+          overflow: "hidden",
+          perspective: `${Math.max(900, (box.w || 600) * 1.3)}px`,
+          WebkitPerspective: `${Math.max(900, (box.w || 600) * 1.3)}px`,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: narrow ? 30 : 42, fontWeight: 500, letterSpacing: "-0.01em" }}>
-          {heading}
-        </h2>
-        <p style={{ margin: "8px 0 0", fontSize: 14, opacity: 0.55, maxWidth: 420 }}>
-          {subheading}
-        </p>
-
-        <div
+        {/* The heading as a giant, dimmed backdrop line running behind the
+            characters — under every card (z 0 vs. their 10+), so they stand
+            in front of it the way the reference's model does. */}
+        <h2
           style={{
-            position: "relative",
-            flex: "1 1 auto",
-            minHeight: narrow ? 320 : 0,
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "center",
-            overflow: "hidden",
-            paddingTop: 28,
-            perspective: `${Math.max(900, (box.w || 600) * 1.3)}px`,
-            WebkitPerspective: `${Math.max(900, (box.w || 600) * 1.3)}px`,
+            position: "absolute",
+            left: "50%",
+            top: narrow ? "30%" : "21%",
+            transform: "translate(-50%, -50%)",
+            margin: 0,
+            whiteSpace: "nowrap",
+            fontSize: headingSize,
+            fontWeight: 900,
+            letterSpacing: "-0.035em",
+            textTransform: "uppercase",
+            lineHeight: 0.9,
+            opacity: 0.34,
+            pointerEvents: "none",
+            userSelect: "none",
+            zIndex: 0,
           }}
         >
+          {heading}
+        </h2>
+          {/* A warm, fixed spotlight pooled where the active card always
+              ends up — lifts whatever it's wearing, however dark, clear of
+              the backdrop behind it, the way the reference's own light
+              falls right on its subject rather than spreading flat and
+              even over everything. */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: 0,
+              transform: "translateX(-50%)",
+              width: "46%",
+              height: "88%",
+              background:
+                "radial-gradient(ellipse 60% 85% at 50% 100%, rgba(255,214,180,0.22) 0%, rgba(255,214,180,0) 70%)",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          />
           {items.map((look, i) => {
             const isActive = i === active;
             // Base placement only — every frame, `applyFrame` overwrites
@@ -881,204 +946,116 @@ export default function TryTheLook({
           })}
         </div>
 
-        {/* -------------------------------------------------- bottom nav */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            marginTop: 18,
-          }}
-        >
-          <button
-            type="button"
-            aria-label="Previous look"
-            onClick={() => handlePick(active - 1)}
-            style={navArrowStyle}
-          >
-            ←
-          </button>
-
-          <div style={{ flex: "1 1 auto", display: "flex", gap: 8, minWidth: 0 }}>
-            {items.map((look, i) => {
-              const isActive = i === active;
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => handlePick(i)}
-                  aria-label={`${look.label} look`}
-                  aria-current={isActive}
-                  style={{
-                    flex: isActive ? "2 1 0" : "1 1 0",
-                    minWidth: 0,
-                    border: "none",
-                    background: "none",
-                    padding: 0,
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: 2,
-                      borderRadius: 1,
-                      background: isActive ? accent : "rgba(0,0,0,0.15)",
-                    }}
-                  />
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: 11,
-                      letterSpacing: "0.04em",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      opacity: isActive ? 1 : 0.45,
-                      fontWeight: isActive ? 600 : 400,
-                    }}
-                  >
-                    {numberOf(i)}
-                    {isActive ? `  ${look.label}` : ""}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            aria-label={playing ? "Pause" : "Play"}
-            aria-pressed={playing}
-            onClick={() => setPlaying((p) => !p)}
-            style={navArrowStyle}
-          >
-            {playing ? "❚❚" : "▶"}
-          </button>
-
-          <button
-            type="button"
-            aria-label="Next look"
-            onClick={() => handlePick(active + 1)}
-            style={navArrowStyle}
-          >
-            →
-          </button>
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------- sidebar */}
-      <div
+      {/* ------------------------------------------------------ overlays */}
+      <p
         style={{
-          flex: narrow ? "0 0 auto" : "0 0 340px",
-          borderLeft: narrow ? "none" : "1px solid rgba(0,0,0,0.08)",
-          borderTop: narrow ? "1px solid rgba(0,0,0,0.08)" : "none",
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
+          position: "absolute",
+          top: pad,
+          left: pad,
+          margin: 0,
+          maxWidth: narrow ? 240 : 320,
+          fontSize: narrow ? 13 : 15,
+          lineHeight: 1.5,
+          opacity: 0.88,
+          zIndex: 2000,
+          pointerEvents: "none",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "24px 24px 12px",
-          }}
-        >
-          <div style={{ fontSize: 18, fontWeight: 600 }}>In this look</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 12, letterSpacing: "0.06em", opacity: 0.5, whiteSpace: "nowrap" }}>
+        {subheading}
+      </p>
+
+      {/* The active look's cards, bottom-left — free to overlap the row a
+          little, the way the reference's cards sit over its subject. */}
+      <div
+        style={{
+          position: "absolute",
+          left: pad,
+          bottom: pad,
+          right: narrow ? pad : "auto",
+          zIndex: 2000,
+          display: "flex",
+          alignItems: "stretch",
+          gap: 12,
+          flexWrap: narrow ? "wrap" : "nowrap",
+        }}
+      >
+        {!narrow && (
+          <div
+            style={{
+              position: "relative",
+              flex: "0 0 auto",
+              width: 150,
+              borderRadius: 18,
+              overflow: "hidden",
+              background: `linear-gradient(160deg, ${accent} 0%, #a3140b 100%)`,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.35)",
+            }}
+          >
+            {/* Cropped to head-and-shoulders: cover-fit, then zoomed in from
+                near the top. `maxWidth: none` so a host page's global
+                `img { max-width: 100% }` can't squash it. */}
+            <img
+              src={srcOf(active)}
+              alt=""
+              draggable={false}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                maxWidth: "none",
+                objectFit: "cover",
+                objectPosition: "50% 0%",
+                transform: "scale(1.9)",
+                transformOrigin: "50% 6%",
+                userSelect: "none",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: 10,
+                bottom: 10,
+                padding: "4px 10px",
+                borderRadius: 999,
+                background: "rgba(0,0,0,0.45)",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.03em",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {current.label}
+            </div>
+          </div>
+        )}
+
+        {!narrow && (
+        <div style={{ ...glassCard, flex: "0 0 260px", padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>In this look</div>
+            <div style={{ fontSize: 11, letterSpacing: "0.06em", opacity: 0.6 }}>
               {current.pieces.length} PIECE{current.pieces.length === 1 ? "" : "S"}
             </div>
-            {sidebarCollapsible && (
-              <button
-                type="button"
-                onClick={() => setSidebarOpen((o) => !o)}
-                aria-label={sidebarOpen ? "Collapse the look panel" : "Expand the look panel"}
-                aria-expanded={sidebarOpen}
-                style={{
-                  flex: "0 0 auto",
-                  width: 26,
-                  height: 26,
-                  borderRadius: "50%",
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "none",
-                  color: "inherit",
-                  fontSize: 11,
-                  lineHeight: 1,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transform: sidebarOpen ? "none" : "rotate(180deg)",
-                  transition: "transform 0.25s ease",
-                }}
-              >
-                ▾
-              </button>
-            )}
           </div>
-        </div>
-
-        <div
-          style={{
-            flex: "1 1 auto",
-            minHeight: 0,
-            maxHeight: sidebarOpen ? 2000 : 0,
-            opacity: sidebarOpen ? 1 : 0,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            transition: "max-height 0.32s ease, opacity 0.22s ease",
-          }}
-        >
-          <div style={{ overflow: "hidden", minHeight: 0, flex: "1 1 auto", display: "flex", flexDirection: "column" }}>
-        <div style={{ borderTop: "1px solid rgba(0,0,0,0.1)" }} />
-
-        <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}>
           {current.pieces.map((piece, i) => (
             <div
               key={`${active}-${i}`}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 14,
-                padding: "16px 24px",
-                borderBottom: "1px solid rgba(0,0,0,0.08)",
+                gap: 10,
+                padding: "7px 0",
+                borderTop: i ? "1px solid rgba(255,255,255,0.12)" : "none",
               }}
             >
-              <div
-                style={{
-                  position: "relative",
-                  flex: "0 0 auto",
-                  width: 20,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  opacity: 0.45,
-                }}
-              >
-                {i + 1}
-              </div>
-              <Swatch color={piece.color} label={piece.brand} />
+              <Swatch color={piece.color} label={piece.brand} size={32} />
               <div style={{ flex: "1 1 auto", minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 10,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    opacity: 0.5,
+                    fontSize: 13,
                     fontWeight: 600,
-                  }}
-                >
-                  {piece.brand}
-                </div>
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    marginTop: 2,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -1086,8 +1063,8 @@ export default function TryTheLook({
                 >
                   {piece.name}
                 </div>
-                <div style={{ fontSize: 13, marginTop: 2, opacity: 0.7 }}>
-                  {money(piece.price)}
+                <div style={{ fontSize: 11, opacity: 0.65 }}>
+                  {piece.brand} · {money(piece.price)}
                 </div>
               </div>
               <button
@@ -1096,12 +1073,12 @@ export default function TryTheLook({
                 onClick={() => onAddToBag?.(piece, i, current, active)}
                 style={{
                   flex: "0 0 auto",
-                  width: 28,
-                  height: 28,
+                  width: 26,
+                  height: 26,
                   borderRadius: "50%",
-                  border: "1px solid rgba(0,0,0,0.15)",
+                  border: "1px solid rgba(255,255,255,0.35)",
                   background: "none",
-                  fontSize: 16,
+                  fontSize: 15,
                   lineHeight: 1,
                   cursor: "pointer",
                   color: "inherit",
@@ -1112,76 +1089,86 @@ export default function TryTheLook({
             </div>
           ))}
         </div>
+        )}
 
-        <div style={{ padding: "16px 24px 24px", borderTop: "1px solid rgba(0,0,0,0.1)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{bundleLabel}</div>
-              {bundleDiscount > 0 && (
-                <div style={{ fontSize: 12, opacity: 0.5, marginTop: 2 }}>
-                  Bundle all {current.pieces.length} and save{" "}
-                  {Math.round(bundleDiscount * 100)}%
-                </div>
-              )}
+        {/* On a phone there's no room for the full piece list over the
+            row, so it's just the bundle total and button, in one slim bar. */}
+        {narrow && bundleCard}
+      </div>
+
+      {/* The bundle total sits on its own at bottom-right on wide screens,
+          like the reference's rating stat — keeping the middle clear for
+          the character in front. */}
+      {!narrow && (
+        <div style={{ position: "absolute", right: pad, bottom: pad, zIndex: 2000, display: "flex" }}>
+          {bundleCard}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The look's bundle total and its "add the whole look" button. */
+function BundleCard({ narrow, bundleLabel, discounted, total, bundleDiscount, accent, addToBagLabel, onAdd }) {
+  return (
+        <div
+          style={{
+            ...glassCard,
+            flex: narrow ? "1 1 auto" : "0 0 200px",
+            padding: narrow ? "10px 12px 10px 16px" : "16px 18px",
+            display: "flex",
+            flexDirection: narrow ? "row" : "column",
+            alignItems: narrow ? "center" : "stretch",
+            justifyContent: "space-between",
+            gap: narrow ? 10 : 0,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: narrow ? 12 : 14, fontWeight: 600, opacity: 0.9 }}>{bundleLabel}</div>
+            <div style={{ fontSize: narrow ? 22 : 38, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.1, marginTop: narrow ? 0 : 4 }}>
+              {money(discounted)}
             </div>
-            <div style={{ textAlign: "right" }}>
-              {bundleDiscount > 0 && (
-                <div
-                  style={{
-                    fontSize: 13,
-                    opacity: 0.45,
-                    textDecoration: "line-through",
-                  }}
-                >
-                  {money(total)}
-                </div>
-              )}
-              <div style={{ fontSize: 17, fontWeight: 700 }}>{money(discounted)}</div>
-            </div>
+            {bundleDiscount > 0 && (
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+                <span style={{ textDecoration: "line-through", opacity: 0.75 }}>{money(total)}</span>
+                {" · "}save {Math.round(bundleDiscount * 100)}%
+              </div>
+            )}
           </div>
-
           <button
             type="button"
-            onClick={() => onAddToBag?.(current.pieces, null, current, active)}
+            onClick={onAdd}
             style={{
-              marginTop: 14,
-              width: "100%",
-              boxSizing: "border-box",
-              padding: "14px 18px",
+              flex: "0 0 auto",
+              marginTop: narrow ? 0 : 12,
+              padding: "10px 14px",
               border: "none",
-              borderRadius: 10,
+              borderRadius: 999,
               background: accent,
               color: "#FFFFFF",
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 600,
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: 8,
+              whiteSpace: "nowrap",
             }}
           >
             {addToBagLabel}
             <span aria-hidden="true">→</span>
           </button>
         </div>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
-const navArrowStyle = {
-  flex: "0 0 auto",
-  width: 32,
-  height: 32,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: "none",
-  background: "none",
-  fontSize: 15,
-  cursor: "pointer",
-  color: "inherit",
-  opacity: 0.75,
+const glassCard = {
+  boxSizing: "border-box",
+  borderRadius: 18,
+  background: "rgba(255,255,255,0.1)",
+  border: "1px solid rgba(255,255,255,0.18)",
+  backdropFilter: "blur(14px)",
+  WebkitBackdropFilter: "blur(14px)",
+  boxShadow: "0 18px 40px rgba(0,0,0,0.3)",
 };
