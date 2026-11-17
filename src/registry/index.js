@@ -17,6 +17,8 @@ import tryTheLook from "../library/try-the-look/meta.jsx";
 import magneticCarousel from "../library/magnetic-carousel/meta.jsx";
 import hoverImageReveal from "../library/hover-image-reveal/meta.jsx";
 import particleHero from "../library/particle-hero/meta.jsx";
+import textPath from "../library/text-path/meta.jsx";
+import heatStreakRing from "../library/heat-streak-ring/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -35,6 +37,8 @@ export const components = [
   magneticCarousel,
   hoverImageReveal,
   particleHero,
+  textPath,
+  heatStreakRing,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
