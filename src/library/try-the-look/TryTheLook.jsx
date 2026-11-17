@@ -330,8 +330,15 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls) {
     if (vEl) vEl.style.opacity = clamp((eased - 0.85) / 0.15, 0, 1).toFixed(3);
     const mEl = mirrorEls[i];
     if (mEl) {
-      mEl.style.width = `${cardW}px`;
-      mEl.style.height = `${cardH}px`;
+      // The mirror only ever shows once a card's nearly at the very back of
+      // the turn — sized at full scale it read as *larger* than the actual
+      // cards out at that ring, which had already stepped down. Sizing it
+      // at the same, smallest, "furthest ring" size it's standing in for
+      // keeps it no bigger than the real thing ever gets.
+      const mirrorH = cardH - rings * HEIGHT_STEP_PX;
+      const mirrorW = cardW * (mirrorH / cardH);
+      mEl.style.width = `${mirrorW.toFixed(1)}px`;
+      mEl.style.height = `${mirrorH.toFixed(1)}px`;
       mEl.style.transform = `translateX(calc(-50% + ${mirrorX.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${(-MAX_DEPTH).toFixed(1)}px) scale(${BACK_SCALE})`;
       mEl.style.filter = `blur(${MAX_BLUR}px)`;
       mEl.style.opacity = mirrorOpacity.toFixed(3);
@@ -804,34 +811,6 @@ export default function TryTheLook({
                       pointerEvents: "none",
                     }}
                   />
-                  {/* Same number the bottom nav shows for this look — a plain
-                      child of the card, so it fades/blurs with it for free
-                      (the card's own opacity/filter, set above, already
-                      covers its whole subtree); no separate ref needed. */}
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      position: "absolute",
-                      top: 6,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      width: 26,
-                      height: 26,
-                      borderRadius: "50%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: "0.02em",
-                      color: isActive ? "#fff" : color,
-                      background: isActive ? accent : "rgba(255,255,255,0.7)",
-                      border: isActive ? "none" : "1px solid rgba(0,0,0,0.12)",
-                      pointerEvents: "none",
-                    }}
-                  >
-                    {numberOf(i).replace(/^0/, "")}
-                  </span>
                   {/* Always mounted, never conditional on `isActive` — that flips
                       the instant a card is clicked, long before it's visually
                       arrived at centre. Its opacity is set continuously by
