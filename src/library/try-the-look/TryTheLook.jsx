@@ -100,6 +100,12 @@ const FAR_FRACTION = 0.97;
  * drawn once at each edge) sits — a little short of the 3rd card's own
  * position, so it reads as tucked in just behind it, not side by side. */
 const MIRROR_X_FRACTION = 0.8;
+/** How far the mirror is nudged off its resting spot while a turn is still
+ * in flight, along the turn's own direction — eased back to 0 by the
+ * turn's own progress, so both edges' mirrors always slide the one way
+ * the ring is actually turning, and reverse together the moment it turns
+ * back, rather than each one closing in toward centre on its own. */
+const MIRROR_ENTRY_FRACTION = 0.25;
 /** Cubic ease-out — the turn starts at full speed and settles gently,
  * whether it is one ring or five; only the overall duration changes with
  * distance, never the shape of the curve. */
@@ -231,7 +237,7 @@ const shapeByRing = (at, rings) => {
  * 60; only how far it has to turn to reach a distant one changes, not how
  * many read as "in view" at a time.
  */
-function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls) {
+function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, turnT) {
   // However it happened, a non-finite angle must never be written into a
   // style — that's what a genuinely broken frame (every card's `transform`
   // literally the string "NaN") would look like. Leaving the last good
@@ -275,10 +281,23 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls) {
     // Only the card nearest the far point of the turn ever shows a mirror at
     // the opposite edge — a step or two out shows just its own side.
     const mirrorOpacity = opacity * Math.pow(backness, MIRROR_POWER);
-    // The mirror's own spot is fixed (a little short of the edge, on
-    // whichever side `x` isn't), not just `x` flipped — so it reads as its
-    // own card tucked behind the 3rd one, not a copy riding on it.
-    const mirrorX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
+    // The mirror's own resting spot — a little short of the edge, on
+    // whichever side `x` isn't, not just `x` flipped, so it reads as its
+    // own card tucked behind the 3rd one, not a copy riding on it. Nudged
+    // off that spot by `dir` — the turn's own direction, shared by every
+    // card this frame, not each card's own side — and eased back to 0 by
+    // `turnT`, the turn's own progress (not this one card's backness, which
+    // some cards never reach the threshold of), so the nudge is exactly
+    // gone the instant any turn settles rather than sometimes lingering.
+    // Both edges get the identical nudge, so they always read as one
+    // consistent sweep matching the turn, never a lone stray offset on one
+    // side only. Resolved over just the turn's opening stretch — scaled up
+    // so it's *gone* well before the turn itself settles — rather than
+    // lingering the full length of a slow or multi-ring turn, which read
+    // as the edges dragging behind instead of snapping along with it.
+    const mirrorT = clamp(turnT * 6, 0, 1);
+    const mirrorRestX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
+    const mirrorX = mirrorRestX + dir * MIRROR_ENTRY_FRACTION * edgeX * (1 - mirrorT);
     const gray = clamp(backness * 0.55, 0, 0.55).toFixed(3);
 
     // A step down in height per ring out — the closer a card's priority to
@@ -525,6 +544,9 @@ export default function TryTheLook({
   // target — is what keeps rapid successive clicks smooth: each one just
   // redirects the ring from wherever it actually, visually is right now.
   const animRef = useRef(null);
+  // Which way the ring is currently headed (+1/-1) — set once per click in
+  // `spin`, read every frame by `applyFrame` for the edge mirrors' nudge.
+  const dirRef = useRef(1);
   // Everything the frame loop needs that can change from outside a click —
   // read fresh every frame so a prop change lands on the very next frame.
   const liveRef = useRef(null);
@@ -616,6 +638,11 @@ export default function TryTheLook({
     // character started from centre.
     const duration = Math.max(0.15, spinSeconds) * clamp(1 + (Math.abs(steps) - 1) * 0.42, 1, 2.6);
     animRef.current = { from, to, start: performance.now(), duration };
+    // Which way this turn is headed — both edge mirrors nudge along this
+    // same screen-direction while a card is handing off round the back,
+    // instead of each one simply easing toward its own centre regardless
+    // of which way the ring is actually turning.
+    dirRef.current = Math.sign(to - from) || dirRef.current;
     const changed = nextActive !== curActive;
     activeRef.current = nextActive;
     setActiveState(nextActive);
@@ -634,15 +661,20 @@ export default function TryTheLook({
     let raf;
     const frame = (now) => {
       const anim = animRef.current;
+      // How far through the *turn itself* we are — 1 once it's settled (or
+      // if nothing's in flight) — not any one card's own backness, which
+      // some cards never climb high enough to reach, leaving a nudge tied
+      // to it stuck on forever instead of resolved the moment the turn is.
+      let turnT = 1;
       if (anim) {
-        const t = clamp((now - anim.start) / (anim.duration * 1000), 0, 1);
-        rotYRef.current = anim.from + (anim.to - anim.from) * EASE(t);
-        if (t >= 1) animRef.current = null;
+        turnT = clamp((now - anim.start) / (anim.duration * 1000), 0, 1);
+        rotYRef.current = anim.from + (anim.to - anim.from) * EASE(turnT);
+        if (turnT >= 1) animRef.current = null;
       }
-      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current);
+      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current, dirRef.current, turnT);
       raf = requestAnimationFrame(frame);
     };
-    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current);
+    applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current, dirRef.current, 1);
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
