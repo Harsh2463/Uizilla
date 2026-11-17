@@ -68,6 +68,16 @@ const looks = [
     { key: "spacing", label: "Spacing", type: "number", min: 0.4, max: 2.2, step: 0.05, default: 1 },
     { key: "cardScale", label: "Character Size", type: "number", min: 0.5, max: 1.8, step: 0.05, default: 1 },
     { key: "spinSeconds", label: "Transition Speed", unit: "s", type: "number", min: 0.15, max: 1.5, step: 0.01, default: 0.68 },
+    {
+      key: "easing", label: "Motion Style", type: "select", default: "smooth",
+      options: [
+        ["smooth", "Smooth (ease-out)"],
+        ["snappy", "Snappy"],
+        ["backOut", "Overshoot"],
+        ["elastic", "Elastic"],
+      ],
+    },
+    { key: "plateWidth", label: "Texture Plate Width", unit: "px", type: "number", min: 0, max: 80, step: 1, default: 17 },
     { key: "autoplay", label: "Autoplay", type: "toggle", default: false },
     { key: "autoplaySeconds", label: "Auto-Slide Speed", unit: "s", type: "number", min: 0.4, max: 8, step: 0.1, default: 3.2 },
     {
@@ -75,15 +85,6 @@ const looks = [
       default: `
     radial-gradient(ellipse 80% 75% at 55% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 38%, rgba(25,0,0,0.42) 68%, rgba(8,0,0,0.88) 100%),
     radial-gradient(ellipse 45% 50% at 6% 4%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 70%),
-    repeating-linear-gradient(90deg,
-      rgba(0,0,0,0.16) 0px,
-      rgba(0,0,0,0.16) 1px,
-      rgba(0,0,0,0) 2px,
-      rgba(0,0,0,0) 6px,
-      rgba(255,140,110,0.09) 7px,
-      rgba(0,0,0,0) 8px,
-      rgba(0,0,0,0) 12px
-    ),
     radial-gradient(ellipse 70% 65% at 55% 48%, #F43E22 0%, #DC2A1A 28%, #A8180F 56%, #5C0B07 82%, #2A0504 100%)
   `,
     },
@@ -102,6 +103,8 @@ const looks = [
     ["spacing", "number", "1", "How far a card eases out from centre before it's fully faded — lower packs the row tighter, higher spreads it wider."],
     ["cardScale", "number", "1", "Overall size of every character card."],
     ["spinSeconds", "number", "0.68", "How long a turn takes to settle — the carousel's transition smoothness."],
+    ["easing", '"smooth" | "snappy" | "backOut" | "elastic"', '"smooth"', "The motion curve of each turn: fast-start ease-out, a snappy start, a slight overshoot past centre, or a springy wobble. Every curve still ends exactly centred."],
+    ["plateWidth", "number", "17", "Width in px of each vertical plate in the backdrop's panel texture. Lower packs more plates in; 0 turns the texture off."],
     ["autoplay", "boolean", "false", "Step through the looks on their own; any click on a character pauses it."],
     ["autoplaySeconds", "number", "3.2", "Seconds between automatic steps while autoplay is on."],
     ["background / color / accent", "string", "scarlet glow + fine stripes / warm cream / burnt orange", "Backdrop (any CSS background), text colour, and the accent used for the look's photo card and buttons."],

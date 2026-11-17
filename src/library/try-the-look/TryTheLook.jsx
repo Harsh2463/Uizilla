@@ -79,6 +79,16 @@ const MAX_BLUR = 4;
  * unmistakably still a character, just darker and softer, never faded
  * toward invisible. */
 const MIN_BRIGHTNESS = 0.4;
+/** How much of its brightness the farthest ring loses on top of that, as a
+ * card turns from the 2nd ring out to the last — 0.95 leaves it a
+ * near-black silhouette behind the edge cards. */
+const FAR_DARKEN = 0.95;
+/** Brightness of the mirrored echoes — near-black, so they read as shadows
+ * of a figure in the gaps rather than extra characters. */
+const MIRROR_BRIGHTNESS = 0.05;
+/** Opacity of those near-black silhouettes — the farthest ring and the
+ * mirrored echoes — so they sit back as faint shadows. */
+const FAR_OPACITY = 0.2;
 /** <1 keeps the near card (one step out) reading almost clear and only lets
  * the next one out (two steps) pick up real, visible blur — so the row goes
  * "near and clear" → "further and blurred" → "a ghost", rather than an even
@@ -116,10 +126,27 @@ const MIRROR_X_FRACTION = 0.8;
  * the ring is actually turning, and reverse together the moment it turns
  * back, rather than each one closing in toward centre on its own. */
 const MIRROR_ENTRY_FRACTION = 0.25;
-/** Cubic ease-out — the turn starts at full speed and settles gently,
- * whether it is one ring or five; only the overall duration changes with
- * distance, never the shape of the curve. */
-const EASE = (t) => 1 - Math.pow(1 - t, 3);
+/** The turn's motion curves, picked by the `easing` prop. Each maps turn
+ * progress 0→1 to how far round the ring has got; only the overall
+ * duration changes with distance, never the shape of the curve. All start
+ * at 0 and end exactly at 1, so every one still lands dead centre. */
+const EASINGS = {
+  // Fast start, gentle settle — the original feel.
+  smooth: (t) => 1 - Math.pow(1 - t, 3),
+  // Very quick start, long soft landing — snappy.
+  snappy: (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t)),
+  // Slight overshoot past centre, then settles back.
+  backOut: (t) => {
+    const c1 = 1.4;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  },
+  // Springy wobble around centre before it settles.
+  elastic: (t) => {
+    if (t <= 0 || t >= 1) return t <= 0 ? 0 : 1;
+    return Math.pow(2, -9 * t) * Math.sin((t * 10 - 0.75) * ((2 * Math.PI) / 3.2)) + 1;
+  },
+};
 
 const SWATCH_COLORS = ["#D9CDBF", "#1A1A1C", "#9AA3AD", "#6B5B4D", "#3C4654", "#B8471F"];
 
@@ -247,7 +274,7 @@ const shapeByRing = (at, rings) => {
  * 60; only how far it has to turn to reach a distant one changes, not how
  * many read as "in view" at a time.
  */
-function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, turnT) {
+function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, turnP) {
   // However it happened, a non-finite angle must never be written into a
   // style — that's what a genuinely broken frame (every card's `transform`
   // literally the string "NaN") would look like. Leaving the last good
@@ -293,7 +320,12 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
     const scale = BACK_SCALE + (FRONT_SCALE - BACK_SCALE) * eased;
     const lift = (1 - eased) * MAX_LIFT;
     const blur = (1 - eased) * MAX_BLUR;
-    const bright = MIN_BRIGHTNESS + (1 - MIN_BRIGHTNESS) * eased;
+    // Past the 2nd ring, a card dims on toward near-black — the farthest
+    // ring, tucked behind the edge cards, reads as a dark silhouette rather
+    // than a second, competing figure. Continuous in `at`, so a card fades
+    // into and out of that silhouette smoothly as it turns.
+    const farFade = clamp(at - (rings - 1), 0, 1);
+    const bright = (MIN_BRIGHTNESS + (1 - MIN_BRIGHTNESS) * eased) * (1 - FAR_DARKEN * farFade);
     // Only the card nearest the far point of the turn ever shows a mirror at
     // the opposite edge — a step or two out shows just its own side. Tied
     // to `backness` alone now, not an opacity that no longer fades.
@@ -303,18 +335,15 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
     // own card tucked behind the 3rd one, not a copy riding on it. Nudged
     // off that spot by `dir` — the turn's own direction, shared by every
     // card this frame, not each card's own side — and eased back to 0 by
-    // `turnT`, the turn's own progress (not this one card's backness, which
-    // some cards never reach the threshold of), so the nudge is exactly
-    // gone the instant any turn settles rather than sometimes lingering.
-    // Both edges get the identical nudge, so they always read as one
-    // consistent sweep matching the turn, never a lone stray offset on one
-    // side only. Resolved over just the turn's opening stretch — scaled up
-    // so it's *gone* well before the turn itself settles — rather than
-    // lingering the full length of a slow or multi-ring turn, which read
-    // as the edges dragging behind instead of snapping along with it.
-    const mirrorT = clamp(turnT * 6, 0, 1);
+    // `turnP`, the turn's progress through the *same* motion curve the ring
+    // itself uses (not this one card's backness, which some cards never
+    // reach the threshold of). So it slides in exactly in step with the
+    // characters under every motion style — fast with Snappy, gliding with
+    // Silk, even swinging past and back with Elastic — and is exactly gone
+    // the instant any turn settles. Both edges get the identical nudge, so
+    // they always read as one consistent sweep matching the turn.
     const mirrorRestX = -Math.sign(x || 1) * MIRROR_X_FRACTION * edgeX;
-    const mirrorX = mirrorRestX + dir * MIRROR_ENTRY_FRACTION * edgeX * (1 - mirrorT);
+    const mirrorX = mirrorRestX + dir * MIRROR_ENTRY_FRACTION * edgeX * (1 - turnP);
     const gray = clamp(backness * 0.55, 0, 0.55).toFixed(3);
 
     // A step down in height per ring out — the closer a card's priority to
@@ -336,7 +365,9 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
       el.style.height = `${cardHForRing.toFixed(1)}px`;
       el.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${z.toFixed(1)}px) scale(${scale.toFixed(4)})`;
       el.style.filter = `blur(${blur.toFixed(2)}px) grayscale(${gray}) brightness(${bright.toFixed(3)})`;
-      el.style.opacity = "1";
+      // Fully opaque everywhere except that farthest-ring silhouette, which
+      // also eases down to FAR_OPACITY along with its darkening.
+      el.style.opacity = (1 - (1 - FAR_OPACITY) * farFade).toFixed(3);
       el.style.zIndex = String(Math.round(eased * 1000) + 10);
     }
     // A flat ellipse of shadow sitting on the ground under each character's
@@ -376,8 +407,8 @@ function applyFrame(rotY, live, cardEls, mirrorEls, viewEls, shadowEls, dir, tur
       mEl.style.width = `${mirrorW.toFixed(1)}px`;
       mEl.style.height = `${mirrorH.toFixed(1)}px`;
       mEl.style.transform = `translateX(calc(-50% + ${mirrorX.toFixed(1)}px)) translateY(-${lift.toFixed(1)}px) translateZ(${(-MAX_DEPTH).toFixed(1)}px) scale(${BACK_SCALE})`;
-      mEl.style.filter = `blur(${MAX_BLUR}px)`;
-      mEl.style.opacity = mirrorOpacity.toFixed(3);
+      mEl.style.filter = `blur(${MAX_BLUR}px) brightness(${MIRROR_BRIGHTNESS})`;
+      mEl.style.opacity = (mirrorOpacity * FAR_OPACITY).toFixed(3);
     }
   }
 }
@@ -443,6 +474,24 @@ function normLook(entry, i, fallbackImage) {
 
 const money = (n) => `$${n.toFixed(2)}`;
 
+/** The backdrop's vertical panel texture, one plate every `width` px: a
+ * dark seam at each edge, a soft warm highlight across the face. Stops are
+ * kept as fractions of the plate so any width keeps the same shading. */
+const plateTexture = (width) => {
+  const w = clamp(Number(width) || 0, 0, 200);
+  if (!w) return "none";
+  const at = (f) => `${(f * w).toFixed(2)}px`;
+  return `repeating-linear-gradient(90deg,
+    rgba(0,0,0,0.2) 0px,
+    rgba(0,0,0,0.2) ${at(1 / 17)},
+    rgba(0,0,0,0) ${at(3 / 17)},
+    rgba(0,0,0,0) ${at(8 / 17)},
+    rgba(255,140,110,0.1) ${at(10 / 17)},
+    rgba(0,0,0,0) ${at(12 / 17)},
+    rgba(0,0,0,0.08) ${at(16 / 17)},
+    rgba(0,0,0,0.2) ${at(1)})`;
+};
+
 /* ----------------------------------------------------------------- pieces -- */
 
 /** A placeholder swatch for a garment — a coloured card carrying its initial,
@@ -489,18 +538,11 @@ export default function TryTheLook({
   spacing = 1,
   cardScale = 1,
   spinSeconds = 0.68,
+  plateWidth = 17,
+  easing = "smooth",
   background = `
     radial-gradient(ellipse 80% 75% at 55% 50%, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 38%, rgba(25,0,0,0.42) 68%, rgba(8,0,0,0.88) 100%),
     radial-gradient(ellipse 45% 50% at 6% 4%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 70%),
-    repeating-linear-gradient(90deg,
-      rgba(0,0,0,0.16) 0px,
-      rgba(0,0,0,0.16) 1px,
-      rgba(0,0,0,0) 2px,
-      rgba(0,0,0,0) 6px,
-      rgba(255,140,110,0.09) 7px,
-      rgba(0,0,0,0) 8px,
-      rgba(0,0,0,0) 12px
-    ),
     radial-gradient(ellipse 70% 65% at 55% 48%, #F43E22 0%, #DC2A1A 28%, #A8180F 56%, #5C0B07 82%, #2A0504 100%)
   `,
   color = "#F6E9DE",
@@ -572,7 +614,7 @@ export default function TryTheLook({
   // Everything the frame loop needs that can change from outside a click —
   // read fresh every frame so a prop change lands on the very next frame.
   const liveRef = useRef(null);
-  liveRef.current = { box, narrow: box.w > 0 && box.w < 760, spacing, cardScale, n, stepAngle };
+  liveRef.current = { box, narrow: box.w > 0 && box.w < 760, spacing, cardScale, n, stepAngle, easing };
   // One DOM node per card, and its mirrored echo — the frame loop writes
   // straight to these every tick instead of going through React.
   const cardElsRef = useRef([]);
@@ -687,13 +729,19 @@ export default function TryTheLook({
       // if nothing's in flight) — not any one card's own backness, which
       // some cards never climb high enough to reach, leaving a nudge tied
       // to it stuck on forever instead of resolved the moment the turn is.
-      let turnT = 1;
+      // `turnP` is that progress run through the chosen motion curve — the
+      // exact same value the ring's own angle moves by — so anything driven
+      // by it (the mirrors' slide) keeps step with the characters under
+      // every motion style instead of running on a clock of its own.
+      let turnP = 1;
       if (anim) {
-        turnT = clamp((now - anim.start) / (anim.duration * 1000), 0, 1);
-        rotYRef.current = anim.from + (anim.to - anim.from) * EASE(turnT);
+        const turnT = clamp((now - anim.start) / (anim.duration * 1000), 0, 1);
+        const ease = EASINGS[liveRef.current.easing] || EASINGS.smooth;
+        turnP = ease(turnT);
+        rotYRef.current = anim.from + (anim.to - anim.from) * turnP;
         if (turnT >= 1) animRef.current = null;
       }
-      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current, dirRef.current, turnT);
+      applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current, dirRef.current, turnP);
       raf = requestAnimationFrame(frame);
     };
     applyFrame(rotYRef.current, liveRef.current, cardElsRef.current, mirrorElsRef.current, viewElsRef.current, shadowElsRef.current, dirRef.current, 1);
@@ -763,6 +811,21 @@ export default function TryTheLook({
         overflow: "hidden",
       }}
     >
+      {/* The panel texture, laid over `background` and under everything
+          else, so its plate width can be tuned on its own. Masked off
+          toward the edges so the backdrop's dark vignette stays dark. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: plateTexture(plateWidth),
+          WebkitMaskImage: "radial-gradient(ellipse 85% 80% at 55% 50%, #000 40%, rgba(0,0,0,0.35) 100%)",
+          maskImage: "radial-gradient(ellipse 85% 80% at 55% 50%, #000 40%, rgba(0,0,0,0.35) 100%)",
+          pointerEvents: "none",
+        }}
+      />
+
       {/* ------------------------------------------------------- the stage */}
       {/* The carousel fills the whole component edge to edge; everything
           else (copy, the look's cards) floats over it. */}

@@ -14,6 +14,8 @@ import spiralImages from "../library/spiral-images/meta.jsx";
 import spotlightFrames from "../library/spotlight-frames/meta.jsx";
 import clothingFlip from "../library/clothing-flip/meta.jsx";
 import tryTheLook from "../library/try-the-look/meta.jsx";
+import magneticCarousel from "../library/magnetic-carousel/meta.jsx";
+import hoverImageReveal from "../library/hover-image-reveal/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -29,6 +31,8 @@ export const components = [
   spiralImages,
   spotlightFrames,
   tryTheLook,
+  magneticCarousel,
+  hoverImageReveal,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
