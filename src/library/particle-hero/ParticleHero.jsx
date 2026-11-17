@@ -800,7 +800,9 @@ function ParticleField({
       // small screen the background shows through as a faint regular grid.
       if (pointPx > 0 && gridStep > 0) {
         const spacingPx = (gridStep * L.imageScale * canvas.height) / Math.max(1, srcH);
-        pointPx = Math.max(pointPx, spacingPx * 1.6);
+        // Also keep dots wider than ~2 device pixels: smaller ones land on
+        // the pixel grid unevenly and beat against it as faint blotches.
+        pointPx = Math.max(pointPx, spacingPx * 1.6, 2.4);
       }
       gl.uniform1f(draw.u.u_particleSize, pointPx);
       gl.uniform1f(
@@ -871,6 +873,16 @@ function ParticleField({
 
 /* ------------------------------------------------------------------- helpers */
 
+/** `#rgb` / `#rrggbb` + an alpha → `rgba()`. Anything else is returned as is. */
+function withAlpha(color, a) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color).trim());
+  if (!m) return color;
+  let h = m[1];
+  if (h.length === 3) h = h.replace(/./g, (c) => c + c);
+  const n = parseInt(h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 /** Stat cards written as plain "Value | Text" lines, the shape the editor's
@@ -901,7 +913,7 @@ export default function ParticleHero({
   links = DEFAULT_LINKS,
   ctaLabel = "Download",
   ghostWord = "studio",
-  ghostOpacity = 0.58,
+  ghostOpacity = 0.55,
   heading = "Ship work that\\nsurvives review",
   intro = "Every change is read the moment it lands — catching the regression, naming what it touches, and writing the patch in your codebase's own idiom.",
   panelLabel = "See how it works",
@@ -923,9 +935,10 @@ export default function ParticleHero({
   edgeSide = "right",
   edgeWidth = 14,
   edgeMotion = 50,
-  paper = "#EBE8E7",
-  ink = "#0D0D0D",
-  accent = "#0D0D0D",
+  paper = "#1A0B05",
+  ink = "#F7EDE4",
+  accent = "#D9480F",
+  glow = "#FF5B14",
   narrowAt = 760,
   interactive = true,
   onCta,
@@ -1027,7 +1040,7 @@ export default function ParticleHero({
 
   const handleCta = () => onCta?.();
 
-  const muted = "#67615E";
+  const muted = withAlpha(ink, 0.74);
   // A single-line editor field can't hold a real line break, so a typed "\n"
   // counts as one too.
   const headingText = String(heading).replace(/\\n/g, "\n");
@@ -1061,8 +1074,9 @@ export default function ParticleHero({
     minHeight: narrow ? 132 : 142,
     padding: "17px 17px 15px",
     borderRadius: narrow ? 18 : 22,
-    background: "rgba(255,255,255,0.88)",
-    boxShadow: "0 5px 13px rgba(50,45,42,0.05)",
+    background: "rgba(24,10,4,0.55)",
+    border: "1px solid rgba(255,190,150,0.22)",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.28)",
     display: "flex",
     flexDirection: "column",
     justifyContent: "space-between",
@@ -1096,7 +1110,7 @@ export default function ParticleHero({
         boxSizing: "border-box",
         color: ink,
         fontFamily: FONT,
-        background: `radial-gradient(circle at 64% 86%, rgba(255,255,255,0.48), transparent 23%), ${paper}`,
+        background: `radial-gradient(ellipse 78% 74% at 60% 50%, ${withAlpha(glow, 1)} 0%, ${withAlpha(glow, 0.55)} 42%, ${withAlpha(glow, 0.16)} 68%, transparent 88%), radial-gradient(ellipse 90% 42% at 40% 108%, ${withAlpha(glow, 0.5)} 0%, transparent 72%), ${paper}`,
       }}
     >
       <div
@@ -1128,7 +1142,7 @@ export default function ParticleHero({
           {!narrow && (
             <nav style={{ display: "flex", gap: 48, alignItems: "center" }} aria-label="Primary">
               {linkList.map((label, i) => (
-                <span key={i} style={{ fontSize: 11, fontWeight: 700, letterSpacing: "-0.02em", color: "#171717" }}>
+                <span key={i} style={{ fontSize: 11, fontWeight: 700, letterSpacing: "-0.02em", color: ink }}>
                   {label}
                 </span>
               ))}
@@ -1156,7 +1170,7 @@ export default function ParticleHero({
             fontWeight: 700,
             lineHeight: 0.8,
             letterSpacing: "-0.09em",
-            color: `rgba(255,255,255,${clamp(ghostOpacity, 0, 1)})`,
+            color: withAlpha("#FFE6D2", clamp(ghostOpacity, 0, 1)),
             userSelect: "none",
             pointerEvents: "none",
             whiteSpace: "nowrap",
@@ -1340,7 +1354,7 @@ export default function ParticleHero({
                   {stat.value}
                 </strong>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 34px", gap: 10, alignItems: "end" }}>
-                  <p style={{ margin: 0, color: "#716B68", fontSize: 8, lineHeight: 1.22 }}>{stat.text}</p>
+                  <p style={{ margin: 0, color: withAlpha(ink, 0.7), fontSize: 8, lineHeight: 1.22 }}>{stat.text}</p>
                   <button type="button" aria-label={stat.value} onClick={handleCta} style={roundLinkStyle}>
                     ↗
                   </button>
@@ -1362,9 +1376,10 @@ export default function ParticleHero({
               width: narrow ? "auto" : 420,
               padding: 28,
               borderRadius: 24,
-              background: "#111111",
+              background: "#140803",
               color: "#FFFFFF",
-              boxShadow: "0 24px 80px rgba(0,0,0,0.25)",
+              border: "1px solid rgba(255,190,150,0.25)",
+              boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
             }}
           >
             <button
