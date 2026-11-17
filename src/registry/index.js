@@ -16,6 +16,7 @@ import clothingFlip from "../library/clothing-flip/meta.jsx";
 import tryTheLook from "../library/try-the-look/meta.jsx";
 import magneticCarousel from "../library/magnetic-carousel/meta.jsx";
 import hoverImageReveal from "../library/hover-image-reveal/meta.jsx";
+import particleHero from "../library/particle-hero/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -33,6 +34,7 @@ export const components = [
   tryTheLook,
   magneticCarousel,
   hoverImageReveal,
+  particleHero,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
