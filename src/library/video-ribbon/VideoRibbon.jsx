@@ -125,6 +125,7 @@ export default function VideoRibbon({
   headlineScale = 1,
   scrollLength = 900,
   smoothing = 0.09,
+  mobileZoom = 1.35,
   cardRadius = 0.018,
   showFooter = true,
   interactive = true,
@@ -132,7 +133,7 @@ export default function VideoRibbon({
 }) {
   const rootRef = useRef(null);
   const cfgRef = useRef({});
-  cfgRef.current = { work, placeholders, smoothing, cardRadius, interactive, scrollLength };
+  cfgRef.current = { work, placeholders, smoothing, cardRadius, interactive, scrollLength, mobileZoom };
   const workKey = JSON.stringify(work) + "|" + placeholders;
 
   useEffect(() => {
@@ -161,6 +162,7 @@ export default function VideoRibbon({
     let W = 1, H = 1, asp = 1, cols = 3, rows = 2, tanH = 0.3153;
     let target = 0, p = 0;
     let visible = true;
+    let lastZoom = null;
     let THREE = null, renderer = null, scene = null, camera = null;
     let cards = [];
     let path = null, PATH_L = 1;
@@ -182,7 +184,11 @@ export default function VideoRibbon({
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         renderer.setSize(W, H, false);
         camera.aspect = asp;
-        camera.fov = asp < 16 / 9 ? (Math.atan(0.561 / asp) * 360) / Math.PI : FOV;
+        // Narrow boxes widen the camera so the whole ribbon fits; zoom back in a little there
+        // (phones only) so the strip reads bigger.
+        const zoom = W < 760 ? clamp(num(cfgRef.current.mobileZoom, 1.35), 0.8, 2.5) : 1;
+        lastZoom = cfgRef.current.mobileZoom;
+        camera.fov = asp < 16 / 9 ? (Math.atan(0.561 / (asp * zoom)) * 360) / Math.PI : FOV;
         camera.updateProjectionMatrix();
         tanH = Math.tan((camera.fov * Math.PI) / 360);
       }
@@ -455,6 +461,7 @@ export default function VideoRibbon({
           const dt = Math.min(100, now - last);
           last = now;
           if (!visible) return;
+          if (cfgRef.current.mobileZoom !== lastZoom) measure();
           // p eases toward the scroll position, frame-rate independent
           const k = 1 - Math.pow(1 - clamp(num(cfgRef.current.smoothing, 0.09), 0.01, 1), dt / 16.667);
           p += (target - p) * k;

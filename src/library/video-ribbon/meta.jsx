@@ -63,6 +63,7 @@ export default {
     { key: "headlineScale", label: "Headline Size", type: "number", min: 0.5, max: 1.6, step: 0.05, default: 1 },
     { key: "scrollLength", label: "Scroll Length", unit: "%", type: "number", min: 300, max: 1800, step: 50, default: 900 },
     { key: "smoothing", label: "Scroll Smoothing", type: "number", min: 0.02, max: 0.4, step: 0.01, default: 0.09 },
+    { key: "mobileZoom", label: "Mobile Strip Size", type: "number", min: 0.8, max: 2.5, step: 0.05, default: 1.35 },
     { key: "cardRadius", label: "Card Corner Radius", type: "number", min: 0, max: 0.1, step: 0.002, default: 0.018 },
   ],
   props: [
@@ -76,6 +77,7 @@ export default {
     ["headlineScale", "number", "1", "Scales the headline."],
     ["scrollLength", "number", "900", "How long the scroll is, as a percentage of the box height. Longer is slower."],
     ["smoothing", "number", "0.09", "How quickly the animation catches up with the scroll (higher is snappier)."],
+    ["mobileZoom", "number", "1.35", "Phone-width boxes only (under 760 px). How much the camera zooms in on the ribbon so the strip reads larger; 1 is the old size. Higher crops the strip at the screen edges."],
     ["cardRadius", "number", "0.018", "Corner rounding of the cards."],
     ["interactive", "boolean", "true", "Turn off the hover name label (used for the home-page card)."],
     ["style", "CSSProperties", "{}", "Extra styles for the outer wrapper."],
