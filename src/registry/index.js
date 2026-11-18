@@ -19,6 +19,12 @@ import hoverImageReveal from "../library/hover-image-reveal/meta.jsx";
 import particleHero from "../library/particle-hero/meta.jsx";
 import textPath from "../library/text-path/meta.jsx";
 import heatStreakRing from "../library/heat-streak-ring/meta.jsx";
+import smokyText from "../library/smoky-text/meta.jsx";
+import circularText from "../library/circular-text/meta.jsx";
+import ledTicker from "../library/led-ticker/meta.jsx";
+import text3DFlip from "../library/text-3d-flip/meta.jsx";
+import scrollHighlight from "../library/scroll-highlight/meta.jsx";
+import strideBarSite from "../library/stride-bar-site/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -39,6 +45,12 @@ export const components = [
   particleHero,
   textPath,
   heatStreakRing,
+  smokyText,
+  circularText,
+  ledTicker,
+  text3DFlip,
+  scrollHighlight,
+  strideBarSite,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
