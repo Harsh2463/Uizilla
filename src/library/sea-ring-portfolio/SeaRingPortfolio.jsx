@@ -312,11 +312,17 @@ const CSS = `
 .nrs .curve{display:none}
 /* a bent card: thin vertical slices laid along an arc (see Round Carousel); it replaces the flat picture */
 .nrs .face.curved{overflow:visible;transform-style:preserve-3d;border-radius:0;background:transparent;box-shadow:none;-webkit-box-reflect:none;backface-visibility:visible}
+.nrs:not(.sm) .face.curved{border-radius:var(--cr,16px);box-shadow:0 18px 36px -24px rgba(0,0,0,.45)}
+/* a bent card cannot use -webkit-box-reflect (it flattens the 3D bend), so its reflection is drawn by hand */
+.nrs .curve .rf{display:none;position:absolute;left:0;top:calc(100% + 10px);width:100%;height:100%;background:var(--poster) center/cover no-repeat;transform:scaleY(-1);-webkit-mask-image:linear-gradient(to top,rgba(0,0,0,.32),transparent 48%);mask-image:linear-gradient(to top,rgba(0,0,0,.32),transparent 48%);border-radius:var(--cr,16px);pointer-events:none}
+.nrs:not(.sm) .face.curved .rf{display:block}
 .nrs .face.curved .curve{display:block;position:absolute;inset:0;transform-style:preserve-3d}
 .nrs .face.curved>img,.nrs .face.curved>video{visibility:hidden}
-.nrs .face.curved .chip,.nrs .face.curved .bar,.nrs .face.curved .dim{transform:translateZ(2px)}
+.nrs .face.curved .chip,.nrs .face.curved .bar,.nrs .face.curved .dim{transform:translateZ(var(--lift,3px))}
 .nrs .curve .sl{position:absolute;top:0;height:100%;overflow:hidden;background:var(--onsky)}
 .nrs .curve .sh,.nrs .curve .hl{position:absolute;inset:0;pointer-events:none;opacity:var(--ck,1)}
+.nrs .curve .vc{display:none;position:absolute;left:0;top:0;width:100%;height:100%}
+.nrs .face.vplay .curve .vc{display:block}
 .nrs .curve .sp{position:absolute;top:0;left:0;background-image:var(--poster);background-size:cover !important;background-position:center;background-repeat:no-repeat}
 .nrs .face video{opacity:0;transition:opacity .4s}
 .nrs .face video.on{opacity:1}
@@ -643,6 +649,25 @@ export default function SeaRingPortfolio({
     };
     // Sets how far a card is bent (kk 0..1 of its full curve), so the bend can grow smoothly while the
     // ring moves from the loader formation to its opened position instead of switching on at once.
+    // Bent cards cannot show a <video> directly, so the playing clip is copied into each slice's canvas
+    // (cover-fitted, ~30 fps, only for cards that are playing).
+    const drawCurveVideo = (c) => {
+      const m = c.cm;
+      const v = c.vid;
+      if (!m || !m.cv || v.readyState < 2 || !v.videoWidth) return;
+      if (c.lastT === v.currentTime) return;
+      c.lastT = v.currentTime;
+      const sc = Math.max(m.w / v.videoWidth, m.h / v.videoHeight);
+      const offX = (m.w - v.videoWidth * sc) / 2;
+      const offY = (m.h - v.videoHeight * sc) / 2;
+      for (let i = 0; i < m.sl.length; i++) {
+        const sl = m.sl[i];
+        if (!sl.cv) continue;
+        const g = sl.cv.getContext("2d");
+        if (m.vertical) g.drawImage(v, -offX / sc, (sl.p0 - offY) / sc, m.w / sc, sl.win / sc, 0, 0, sl.cv.width, sl.cv.height);
+        else g.drawImage(v, (sl.p0 - offX) / sc, -offY / sc, sl.win / sc, m.h / sc, 0, 0, sl.cv.width, sl.cv.height);
+      }
+    };
     const applyCurve = (c, kk) => {
       const m = c.cm;
       c.ck = kk;
@@ -650,6 +675,8 @@ export default function SeaRingPortfolio({
       c.holder.style.setProperty("--ck", kk.toFixed(3));
       const dk = m.deg * kk;
       const R = dk > 0.01 ? m.len / (dk * DEG) : 0;
+      // the hover content (chip, bar, dim) is flat, so it sits just in front of the nearest part of the bend
+      c.face.style.setProperty("--lift", (3 + (R && m.hug ? R * (1 - Math.cos(m.len / 2 / R)) : 0)).toFixed(1) + "px");
       const sg = m.vertical ? (m.hug ? 1 : -1) : m.hug ? -1 : 1;
       for (let i = 0; i < m.sl.length; i++) {
         const { d, cc } = m.sl[i];
@@ -665,7 +692,7 @@ export default function SeaRingPortfolio({
           : `translate3d(${dd}px,0,${dz}px) rotateY(${rot}rad)`;
       }
     };
-    const buildCurve = (c, w, h) => {
+    const buildCurve = (c, w, h, site) => {
       const holder = c.holder;
       if (!holder) return;
       holder.textContent = "";
@@ -683,10 +710,12 @@ export default function SeaRingPortfolio({
       const shade = clamp(num(P.curveShade, 0.55), 0, 1) * 0.85;
       const vertical = phone;
       const len = vertical ? h : w;
-      const n = clamp(Math.ceil(len / 5), 24, 64);
+      const n = clamp(Math.ceil(len / 6), 20, 48);
       const sw = len / n;
       const win = sw + 4;
-      const meta = { sl: [], len, deg, hug, vertical };
+      // in video mode each slice also carries a canvas that is fed the playing clip (see drawCurveVideo)
+      const withVideo = P.mediaMode === "video" && !!(site && site.video);
+      const meta = { sl: [], len, deg, hug, vertical, w, h, cv: withVideo };
       const frag = document.createDocumentFragment();
       for (let k = 0; k < n; k++) {
         const p0 = k * sw - 1.5;
@@ -710,6 +739,17 @@ export default function SeaRingPortfolio({
         p.style.width = w + "px";
         p.style.height = h + "px";
         d.appendChild(p);
+        if (withVideo) {
+          const cvs = document.createElement("canvas");
+          cvs.className = "vc";
+          cvs.width = Math.max(1, Math.round(vertical ? w : win));
+          cvs.height = Math.max(1, Math.round(vertical ? win : h));
+          if (vertical) cvs.style.top = -0 + "px";
+          d.appendChild(cvs);
+          meta.sl[meta.sl.length - 1].cv = cvs;
+          meta.sl[meta.sl.length - 1].p0 = p0;
+          meta.sl[meta.sl.length - 1].win = win;
+        }
         // Lighting follows the bend. The light comes from the top (phones) or the right (desktop), so the
         // part of the arc that faces it is brightened and the part turned away is darkened; both grow
         // toward the edges, plus a little occlusion shadow at the very rim. A concave card (hug) faces
@@ -738,6 +778,11 @@ export default function SeaRingPortfolio({
         d.appendChild(sh);
         frag.appendChild(d);
       }
+      if (!vertical) {
+        const rf = document.createElement("div");
+        rf.className = "rf";
+        frag.appendChild(rf);
+      }
       holder.appendChild(frag);
       c.cm = meta;
       applyCurve(c, curveK);
@@ -762,10 +807,12 @@ export default function SeaRingPortfolio({
       if (s.link) { c.el.target = "_blank"; c.el.rel = "noopener"; } else { c.el.removeAttribute("target"); }
       c.img.src = s.poster || "";
       c.el.style.setProperty("--poster", `url("${s.poster || ""}")`);
-      buildCurve(c, w, ch);
+      buildCurve(c, w, ch, s);
       c.title.textContent = s.title;
       c.world.textContent = WORLDS[s.world].label;
       c.num.textContent = "No. " + String(s.num).padStart(2, "0");
+      c.face.classList.remove("vplay");
+      c.lastT = -1;
       if (c.vidSrc) {
         c.vid.pause();
         c.vid.removeAttribute("src");
@@ -1159,7 +1206,7 @@ export default function SeaRingPortfolio({
       // the ring starts turning the moment the opening begins (rot.x is 0 until then), so the motion
       // carries on from the loader into the opened ring with no jump or pause
       const rv = revealed ? rot.x : 0;
-      curveK = Math.round(e * 100) / 100;
+      curveK = Math.round(e * 30) / 30; // steps keep the per-frame work small while the bend grows
       for (let slot = 0; slot < SLOTS; slot++) {
         const c = cardApi[slot];
         const raw = (360 * slot) / SLOTS + rv + 180;
@@ -1179,7 +1226,10 @@ export default function SeaRingPortfolio({
         const y = vert ? Math.sin(l * DEG) * cr : 0;
         const z = -Math.cos(l * DEG) * cr;
         const appear = Math.min(1, 2.5 * i);
-        const hidden = (z + push) * Math.cos(tr) >= persp - 70 || (introDone && Math.abs(r) > 96);
+        // cards on the far side of the opened ring fade out as it opens (no pop when the intro ends)
+        const far = revealed && Math.abs(r) > 96;
+        const farFade = far ? Math.max(0, 1 - e * 1.25) : 1;
+        const hidden = (z + push) * Math.cos(tr) >= persp - 70 || (far && farFade <= 0.01);
         const el = c.el;
         if (hidden) {
           if (el.style.display !== "none") el.style.display = "none";
@@ -1190,12 +1240,12 @@ export default function SeaRingPortfolio({
           el.style.transform = vert
             ? `translate3d(0,${y}px,${z}px) rotateX(${l}deg) scale(${cardScale})`
             : `translate3d(${x}px,0,${z}px) rotateY(${l}deg) scale(${cardScale})`;
-          el.style.opacity = appear;
+          el.style.opacity = appear * farFade;
           c.face.style.transform = z > (radius * radius) / persp ? (vert ? "rotateX(180deg)" : "rotateY(180deg)") : "";
           if (c.cm && c.ck !== curveK) applyCurve(c, curveK);
-          const vOk = !c.face.classList.contains("curved") && exp > 0.9 && !reduced && document.visibilityState === "visible";
-          c.pre = vOk && Math.abs(r) <= 135; // start loading before the card turns to face you, never mid-motion
-          c.want = vOk && Math.abs(r) <= 78;
+          const vOk = exp > 0.9 && !reduced && document.visibilityState === "visible";
+          c.pre = vOk && Math.abs(r) <= 150; // start loading before the card turns to face you, never mid-motion
+          c.want = vOk && Math.abs(r) <= 100; // every card you can see plays
         }
         // hover tilt springs
         if (!settled(c.rx) || !settled(c.ry) || !settled(c.tz)) {
@@ -1215,12 +1265,19 @@ export default function SeaRingPortfolio({
         if (c.vidSrc) {
           if (c.want && c.vid.paused) c.vid.play().catch(() => {});
           else if (!c.want && !c.vid.paused) c.vid.pause();
+          if (c.want && c.cm && c.cm.cv && !c.vid.paused && (frameNo & 1) === 0) drawCurveVideo(c);
         }
       }
     };
     cardApi.forEach((c, e) => {
-      c.vid.addEventListener("playing", () => c.vid.classList.add("on"));
-      c.vid.addEventListener("error", () => c.vid.classList.remove("on"));
+      c.vid.addEventListener("playing", () => {
+        c.vid.classList.add("on");
+        if (c.cm && c.cm.cv) c.face.classList.add("vplay");
+      });
+      c.vid.addEventListener("error", () => {
+        c.vid.classList.remove("on");
+        c.face.classList.remove("vplay");
+      });
       c.img.addEventListener("error", () => {
         const st = sitesNowEarly()[slotSite[e]];
         if (st && c.img.getAttribute("src") !== st.ph) {
