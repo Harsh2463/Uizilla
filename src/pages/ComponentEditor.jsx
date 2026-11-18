@@ -40,6 +40,14 @@ function Editor({ c }) {
   const [menu, setMenu] = useState(false);
   const [note, setNote] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Bumping this remounts the live preview: it starts over (intro, animation state) with the current values.
+  const [renderKey, setRenderKey] = useState(0);
+  const [spinning, setSpinning] = useState(false);
+  const refresh = () => {
+    setRenderKey((k) => k + 1);
+    setSpinning(true);
+    setTimeout(() => setSpinning(false), 600);
+  };
   const menuRef = useRef(null);
 
   // A control with `presets` (a variant, say) also sets the controls it names.
@@ -230,6 +238,29 @@ function Editor({ c }) {
               >
                 {sidebarCollapsed ? "⟩⟩ Controls" : "⟨⟨ Hide"}
               </button>
+              <button
+                type="button"
+                onClick={refresh}
+                aria-label="Re-render the preview"
+                title="Re-render the preview (keeps your edits, no page reload)"
+                className="flex h-8 items-center gap-1.5 rounded-md border border-[var(--line)] px-2.5 text-[13px] text-[var(--muted)] transition-colors hover:text-white"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={spinning ? { animation: "edRefreshSpin .6s ease-in-out" } : undefined}
+                >
+                  <path d="M20 12a8 8 0 1 1-2.6-5.9" />
+                  <path d="M20 4v5h-5" />
+                </svg>
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
               <div className="flex rounded-lg bg-black p-0.5" role="group" aria-label="Preview width">
                 {DEVICES.map(([id, label]) => (
                   <button
@@ -259,7 +290,7 @@ function Editor({ c }) {
                 maxWidth: "100%",
               }}
             >
-              <Preview {...values} />
+              <Preview key={renderKey} {...values} />
             </div>
           </div>
         </section>

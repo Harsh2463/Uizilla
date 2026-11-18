@@ -62,3 +62,6 @@ button:focus-visible {
 .ok-range::-moz-range-track { height: 40px; background: transparent; }
 .ok-range::-moz-range-thumb { width: 12px; height: 30px; border: 0; border-radius: 6px; background: #c8c8c8; }
 .ok-range:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* editor: spin the refresh icon once when the preview is re-rendered */
+@keyframes edRefreshSpin { to { transform: rotate(360deg); } }
