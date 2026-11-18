@@ -938,13 +938,21 @@ export default function SeaRingPortfolio({
       const sites = propsRef.current.sites;
       const N2 = Math.max(1, sites.length);
       const e = exp;
-      const tilt = -22 * (1 - e);
+      // Phones get a tighter, deeper ring once it has opened: a smaller radius and closer camera so the
+      // side cards curve away, the front of the ring pushed toward the viewer, and a slight tilt so it
+      // reads as a rounded ring. Desktop keeps the original shape.
+      const endR = phone ? 1100 : 1800;
+      const endP = phone ? 520 : 760;
+      const endTilt = phone ? -8 : 0;
+      const endScale = phone ? 1.35 : 2.3;
+      const push = phone ? 260 * e : 0;
+      const tilt = -22 * (1 - e) + endTilt * e;
       const tr = tilt * DEG;
-      const radius = 460 + 1340 * e;
+      const radius = 460 + (endR - 460) * e;
       const anchor = -radius * Math.sin(tr) + 460 * Math.sin(-22 * DEG) * (1 - e);
-      const persp = 1000 + (760 - 1000) * e;
+      const persp = 1000 + (endP - 1000) * e;
       const roll = -20 * (1 - e);
-      const cardScale = 0.52 + (2.3 - 0.52) * e * e;
+      const cardScale = 0.52 + (endScale - 0.52) * e * e;
       const wallScale = phone ? 0.8 : H <= 760 ? 0.9 : 1.1;
       const fit = Math.min(1.05, (W - 32) / 1240, (0.66 * H) / 800) / wallScale;
       const A = wallScale * (fit + (1 - fit) * e);
@@ -954,7 +962,7 @@ export default function SeaRingPortfolio({
       const off = introOff * (1 - e) + anchor * A;
       const ix = 160 * Math.sin(roll * DEG) * A;
       const s = wallScale * (fit + (1 - fit) * e);
-      ring.style.transform = `translate(${ix}px,${off}px) rotateZ(${roll}deg) rotateX(${tilt}deg) scale3d(${s},${s},${A})`;
+      ring.style.transform = `translate3d(${ix}px,${off}px,${push}px) rotateZ(${roll}deg) rotateX(${tilt}deg) scale3d(${s},${s},${A})`;
       const rv = introDone ? rot.x : 0;
       for (let slot = 0; slot < SLOTS; slot++) {
         const c = cardApi[slot];
@@ -974,7 +982,7 @@ export default function SeaRingPortfolio({
         const x = -Math.sin(l * DEG) * cr;
         const z = -Math.cos(l * DEG) * cr;
         const appear = Math.min(1, 2.5 * i);
-        const hidden = z * Math.cos(tr) >= persp - 70 || (introDone && Math.abs(r) > 96);
+        const hidden = (z + push) * Math.cos(tr) >= persp - 70 || (introDone && Math.abs(r) > 96);
         const el = c.el;
         if (hidden) {
           if (el.style.display !== "none") el.style.display = "none";
