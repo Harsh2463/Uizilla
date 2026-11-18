@@ -25,6 +25,7 @@ import ledTicker from "../library/led-ticker/meta.jsx";
 import text3DFlip from "../library/text-3d-flip/meta.jsx";
 import scrollHighlight from "../library/scroll-highlight/meta.jsx";
 import strideBarSite from "../library/stride-bar-site/meta.jsx";
+import videoRibbon from "../library/video-ribbon/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -51,6 +52,7 @@ export const components = [
   text3DFlip,
   scrollHighlight,
   strideBarSite,
+  videoRibbon,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
