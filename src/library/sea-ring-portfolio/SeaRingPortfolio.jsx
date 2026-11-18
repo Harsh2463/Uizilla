@@ -64,6 +64,9 @@ const FRONT_COLORS = ["#D6EEF3", "#FFFFFF", "#FFFFFF", "#D6EEF3", "#D6EEF3"];
 const MOTES = [[8,62,10,14,-2],[18,40,6,18,-9],[27,70,14,16,-5],[36,52,8,20,-13],[44,30,5,17,-3],[53,66,12,15,-11],[61,44,7,19,-7],[69,74,16,14,-1],[77,36,6,21,-15],[85,58,11,16,-8],[92,46,7,18,-4],[13,82,9,22,-17],[48,84,13,17,-6],[72,22,5,23,-19]];
 
 const SLOTS = 16;
+const DEFAULT_NONE = [];
+// every card has the same 16:9 box; the picture or clip is cropped to fill it (object-fit: cover)
+const CARD_RATIO = 16 / 9;
 
 /** A generated "site preview" picture, used when media is switched to placeholders or a URL is missing. */
 function placeholderPoster(title, i, world, ratio) {
@@ -138,11 +141,19 @@ function stepSpring(s, dt) {
 }
 const settled = (s) => Math.abs(s.t - s.x) < 0.01 && Math.abs(s.v) < 0.01;
 
-function parseCards(list, mode) {
+function parseCards(list, mode, images, videos) {
+  const clean = (l) => (Array.isArray(l) ? l : []).map((x) => String(x).trim()).filter(Boolean);
   const arr = (Array.isArray(list) ? list : []).map((l) => String(l)).filter((l) => l.trim());
-  return arr.map((line, i) => {
+  const imgs = clean(images);
+  const vids = clean(videos);
+  // The image and video lists can replace (or add to) the media of the cards by position.
+  const count = Math.max(arr.length, imgs.length, vids.length);
+  return Array.from({ length: count }, (_, i) => {
+    const line = arr[i] !== undefined ? arr[i] : `Card ${i + 1}`;
     const p = line.split("|").map((x) => x.trim());
-    const [title = `Site ${i + 1}`, video = "", poster = "", size = "1600x900", world = "brand", link = ""] = p;
+    let [title = `Site ${i + 1}`, video = "", poster = "", size = "1600x900", world = "brand", link = ""] = p;
+    if (imgs[i]) poster = imgs[i];
+    if (vids[i]) video = vids[i];
     const m = /^(\d+(?:\.\d+)?)\s*[x×:]\s*(\d+(?:\.\d+)?)$/i.exec(size);
     const ratio = m ? num(m[1], 16) / Math.max(1, num(m[2], 9)) : num(size, 16 / 9) || 16 / 9;
     const wd = WORLDS[world] && world !== "ai" ? world : "brand";
@@ -275,8 +286,18 @@ const CSS = `
 .nrs .tilt{position:absolute;inset:0;transform-style:preserve-3d}
 .nrs .cframe{position:absolute;inset:-9px;border:3px solid var(--wc);border-radius:24px;box-shadow:0 40px 80px -30px var(--wc);clip-path:inset(0 100% 0 0 round 24px);transition:clip-path .55s var(--ease);pointer-events:none}
 .nrs .card:hover .cframe{clip-path:inset(0 0 0 0 round 24px)}
-.nrs .face{position:absolute;inset:0;border-radius:16px;overflow:hidden;backface-visibility:hidden;background:var(--onsky);box-shadow:0 18px 36px -24px rgba(0,0,0,.45);-webkit-box-reflect:below 10px linear-gradient(transparent 52%,rgba(255,255,255,.32))}
-.nrs .face img,.nrs .face video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.nrs .face{position:absolute;inset:0;border-radius:var(--cr,16px);overflow:hidden;backface-visibility:hidden;background:var(--onsky);box-shadow:0 18px 36px -24px rgba(0,0,0,.45);}
+.nrs:not(.sm) .face:not(.curved){-webkit-box-reflect:below 10px linear-gradient(transparent 52%,rgba(255,255,255,.32))}
+.nrs .face img,.nrs .face video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover !important}
+.nrs .curve{display:none}
+/* a bent card: thin vertical slices laid along an arc (see Round Carousel); it replaces the flat picture */
+.nrs .face.curved{overflow:visible;transform-style:preserve-3d;border-radius:0;background:transparent;box-shadow:none;-webkit-box-reflect:none;backface-visibility:visible}
+.nrs .face.curved .curve{display:block;position:absolute;inset:0;transform-style:preserve-3d}
+.nrs .face.curved>img,.nrs .face.curved>video{visibility:hidden}
+.nrs .face.curved .chip,.nrs .face.curved .bar,.nrs .face.curved .dim{transform:translateZ(2px)}
+.nrs .curve .sl{position:absolute;top:0;height:100%;overflow:hidden;background:var(--onsky)}
+.nrs .curve .sh,.nrs .curve .hl{position:absolute;inset:0;pointer-events:none;opacity:var(--ck,1)}
+.nrs .curve .sp{position:absolute;top:0;left:0;background-image:var(--poster);background-size:cover !important;background-position:center;background-repeat:no-repeat}
 .nrs .face video{opacity:0;transition:opacity .4s}
 .nrs .face video.on{opacity:1}
 .nrs .chip{position:absolute;left:14px;bottom:14px;display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:99px;background:rgba(0,0,0,.45);color:#fff;font-family:var(--mono);font-size:13px;transition:opacity .3s}
@@ -372,6 +393,9 @@ const CSS = `
 .nrs.sm .stat:first-child{padding-left:0;border-left:0}
 .nrs.sm .stat b{font-size:26px}
 .nrs.sm .stat span{font-size:10px;margin-top:6px}
+.nrs.sm .wall{touch-action:pan-x pinch-zoom}
+.nrs.sm .face,.nrs.sm .face.curved{-webkit-box-reflect:none !important;box-shadow:none !important}
+.nrs.sm .cframe{box-shadow:none}
 .nrs.sm .frame{margin:0 10px 10px;border-radius:20px;clip-path:inset(0 round 20px)}
 .nrs.sm .frame.open{clip-path:inset(var(--ft) var(--fr) var(--fb) var(--fl) round 0)}
 .nrs.sm .build .panel{margin:0 10px;height:auto;min-height:calc(var(--H) - 170px);padding-bottom:22px;border-radius:20px;clip-path:inset(0 round 20px)}
@@ -395,6 +419,17 @@ export default function SeaRingPortfolio({
   seaImage = SEA_IMG,
   seaVideo = SEA_VID,
   mediaMode = "video",
+  cardImages = DEFAULT_NONE,
+  cardVideos = DEFAULT_NONE,
+  cardHeight = 160,
+  cardWidthScale = 1,
+  cornerRadius = 16,
+  ringSpacing = 1,
+  depth = 1,
+  curve = 0,
+  mobileCurve = 22,
+  curveDirection = "hug",
+  curveShade = 0.55,
   buildLine1 = "I take startups",
   buildLine2 = "from sketch to ship.",
   email = "me@noaellsworth.com",
@@ -423,7 +458,7 @@ export default function SeaRingPortfolio({
   // media mode changes (which reloads every poster). The loader and the engine are rebuilt on it.
   const [runKey, setRunKey] = useState(0);
 
-  const sites = useMemo(() => parseCards(cards, mediaMode), [cards, mediaMode]);
+  const sites = useMemo(() => parseCards(cards, mediaMode, cardImages, cardVideos), [cards, mediaMode, cardImages, cardVideos]);
   const lines = useMemo(() => parseSentence(sentence), [sentence]);
   const statList = useMemo(
     () => (Array.isArray(stats) ? stats : []).map((l) => String(l).split("|").map((x) => x.trim())).filter((p) => p[0]).slice(0, 4),
@@ -434,7 +469,7 @@ export default function SeaRingPortfolio({
   const N = Math.max(1, sites.length);
 
   const propsRef = useRef({});
-  propsRef.current = { sites, interactive, autoSpin, spinSpeed, intro, view, hover, mediaMode };
+  propsRef.current = { sites, interactive, autoSpin, spinSpeed, intro, view, hover, mediaMode, cardHeight, cardWidthScale, cornerRadius, ringSpacing, depth, curve, mobileCurve, curveDirection, curveShade };
   const apiRef = useRef({});
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -527,6 +562,7 @@ export default function SeaRingPortfolio({
     // ── size ──
     let W = 800, H = 600, phone = false, u = 1;
     let frameC = 0.5; // frame centre y (px, in root)
+    let lastPhone = null;
     const measure = () => {
       const r = root.getBoundingClientRect();
       W = Math.max(1, r.width);
@@ -534,6 +570,8 @@ export default function SeaRingPortfolio({
       phone = W <= 820;
       u = phone ? W / 390 : Math.min(W, 1.6 * H) / 1440;
       root.classList.toggle("sm", phone);
+      if (lastPhone !== null && lastPhone !== phone && typeof syncSlots === "function") syncSlots(true);
+      lastPhone = phone;
       const st = root.style;
       st.setProperty("--u", u + "px");
       st.setProperty("--W", W + "px");
@@ -562,6 +600,7 @@ export default function SeaRingPortfolio({
       el,
       tilt: el.querySelector(".tilt"),
       face: el.querySelector(".face"),
+      holder: el.querySelector(".curve"),
       img: el.querySelector("img"),
       vid: el.querySelector("video"),
       title: el.querySelector(".bar b"),
@@ -571,13 +610,126 @@ export default function SeaRingPortfolio({
       want: false,
       vidSrc: "",
     }));
+    // Bends a card like a section of a cylinder: many thin vertical slices laid along a circular arc, each
+    // showing its own part of the picture. "hug" curves the edges toward the viewer (following the ring);
+    // "bulge" curves them away.
+    let curveK = 0; // 0 = flat (loader) .. 1 = full curve; follows the ring's expansion
+    const curveDeg = () => {
+      const P = propsRef.current;
+      return clamp(num(phone ? P.mobileCurve : P.curve, 0), 0, 120);
+    };
+    // Sets how far a card is bent (kk 0..1 of its full curve), so the bend can grow smoothly while the
+    // ring moves from the loader formation to its opened position instead of switching on at once.
+    const applyCurve = (c, kk) => {
+      const m = c.cm;
+      c.ck = kk;
+      if (!m) return;
+      c.holder.style.setProperty("--ck", kk.toFixed(3));
+      const dk = m.deg * kk;
+      const R = dk > 0.01 ? m.len / (dk * DEG) : 0;
+      const sg = m.vertical ? (m.hug ? 1 : -1) : m.hug ? -1 : 1;
+      for (let i = 0; i < m.sl.length; i++) {
+        const { d, cc } = m.sl[i];
+        let dd = 0, dz = 0, rot = 0;
+        if (R) {
+          const phi = cc / R;
+          dd = R * Math.sin(phi) - cc;
+          dz = m.hug ? R * (1 - Math.cos(phi)) : R * (Math.cos(phi) - 1);
+          rot = sg * phi;
+        }
+        d.style.transform = m.vertical
+          ? `translate3d(0,${dd}px,${dz}px) rotateX(${rot}rad)`
+          : `translate3d(${dd}px,0,${dz}px) rotateY(${rot}rad)`;
+      }
+    };
+    const buildCurve = (c, w, h) => {
+      const holder = c.holder;
+      if (!holder) return;
+      holder.textContent = "";
+      c.cm = null;
+      const deg = curveDeg();
+      const on = deg > 0.5;
+      c.face.classList.toggle("curved", on);
+      if (!on) return;
+      const P = propsRef.current;
+      const hug = P.curveDirection !== "bulge";
+      const corner = clamp(num(P.cornerRadius, 16), 0, 60);
+      // The bend follows the direction of travel: desktop moves sideways, so the card bends along its
+      // width (vertical slices, curved left/right edges); phones move vertically, so it bends along its
+      // height (horizontal slices, curved top/bottom edges) and the left/right edges stay straight.
+      const shade = clamp(num(P.curveShade, 0.55), 0, 1) * 0.85;
+      const vertical = phone;
+      const len = vertical ? h : w;
+      const n = clamp(Math.ceil(len / 5), 24, 64);
+      const sw = len / n;
+      const win = sw + 4;
+      const meta = { sl: [], len, deg, hug, vertical };
+      const frag = document.createDocumentFragment();
+      for (let k = 0; k < n; k++) {
+        const p0 = k * sw - 1.5;
+        const cc = p0 + win / 2 - len / 2;
+        const d = document.createElement("div");
+        meta.sl.push({ d, cc });
+        d.className = "sl";
+        const p = document.createElement("div");
+        p.className = "sp";
+        if (vertical) {
+          d.style.cssText = `left:0;width:100%;top:${p0}px;height:${win}px`;
+          if (k === 0) d.style.borderRadius = `${corner}px ${corner}px 0 0`;
+          else if (k === n - 1) d.style.borderRadius = `0 0 ${corner}px ${corner}px`;
+          p.style.top = -p0 + "px";
+        } else {
+          d.style.cssText = `top:0;height:100%;left:${p0}px;width:${win}px`;
+          if (k === 0) d.style.borderRadius = `${corner}px 0 0 ${corner}px`;
+          else if (k === n - 1) d.style.borderRadius = `0 ${corner}px ${corner}px 0`;
+          p.style.left = -p0 + "px";
+        }
+        p.style.width = w + "px";
+        p.style.height = h + "px";
+        d.appendChild(p);
+        // Lighting follows the bend. The light comes from the top (phones) or the right (desktop), so the
+        // part of the arc that faces it is brightened and the part turned away is darkened; both grow
+        // toward the edges, plus a little occlusion shadow at the very rim. A concave card (hug) faces
+        // its edges inward, a bulging card faces them outward, so the lit side swaps.
+        // Each slice carries a gradient across its own width (not one flat value), so the lighting
+        // changes smoothly over the whole card and no strips show.
+        const dark = (t) => {
+          const at = Math.min(1, Math.abs(t));
+          const facing = (hug === vertical ? t : -t) > 0 ? 1 : -1; // 1 = turned toward the light
+          return shade * (Math.pow(at, 1.7) * (facing > 0 ? 0.35 : 1.05) + 0.3 * Math.pow(at, 5));
+        };
+        const lite = (t) => {
+          const at = Math.min(1, Math.abs(t));
+          return (hug === vertical ? t : -t) > 0 ? shade * 0.3 * Math.pow(at, 1.4) : 0;
+        };
+        const t0 = (p0 + 1.5 - len / 2) / (len / 2);
+        const t1 = (p0 + win - 1.5 - len / 2) / (len / 2);
+        const dir = vertical ? "to bottom" : "to right";
+        const sh = document.createElement("div");
+        sh.className = "sh";
+        sh.style.background = `linear-gradient(${dir},rgba(0,0,0,${dark(t0).toFixed(3)}),rgba(0,0,0,${dark(t1).toFixed(3)}))`;
+        const hl = document.createElement("div");
+        hl.className = "hl";
+        hl.style.background = `linear-gradient(${dir},rgba(255,255,255,${lite(t0).toFixed(3)}),rgba(255,255,255,${lite(t1).toFixed(3)}))`;
+        d.appendChild(hl);
+        d.appendChild(sh);
+        frag.appendChild(d);
+      }
+      holder.appendChild(frag);
+      c.cm = meta;
+      applyCurve(c, curveK);
+    };
     const applySite = (e, idx) => {
       const sites = propsRef.current.sites;
       const s = sites[idx];
       const c = cardApi[e];
       if (!s || !c) return;
       slotSite[e] = idx;
-      const w = 160 * s.ratio;
+      const P0 = propsRef.current;
+      const ch = clamp(num(P0.cardHeight, 160), 60, 420);
+      const w = ch * CARD_RATIO * clamp(num(P0.cardWidthScale, 1), 0.4, 2);
+      c.el.style.height = ch + "px";
+      c.el.style.top = -ch / 2 + "px";
       c.el.style.width = w + "px";
       c.el.style.left = -w / 2 + "px";
       c.el.dataset.world = s.world;
@@ -586,6 +738,8 @@ export default function SeaRingPortfolio({
       c.el.href = s.link || "#";
       if (s.link) { c.el.target = "_blank"; c.el.rel = "noopener"; } else { c.el.removeAttribute("target"); }
       c.img.src = s.poster || "";
+      c.el.style.setProperty("--poster", `url("${s.poster || ""}")`);
+      buildCurve(c, w, ch);
       c.title.textContent = s.title;
       c.world.textContent = WORLDS[s.world].label;
       c.num.textContent = "No. " + String(s.num).padStart(2, "0");
@@ -643,6 +797,8 @@ export default function SeaRingPortfolio({
     const useIntro = propsRef.current.intro && !reduced && propsRef.current.interactive !== false;
     let t0 = performance.now();
     let tReveal = 0;
+    let tForm = 0; // intro clock in ms, advanced per frame (capped) so a long frame can't jump the animation
+    let tRev = 0;
     let shown = 0;
     let posterLoaded = 0;
     const odoCols = qa("odo");
@@ -703,6 +859,7 @@ export default function SeaRingPortfolio({
     const startReveal = (now) => {
       revealed = true;
       tReveal = now;
+      tRev = 0;
       const ld = q("loader");
       ld && ld.classList.add("out");
       later(() => ld && (ld.style.display = "none"), 1000);
@@ -759,7 +916,8 @@ export default function SeaRingPortfolio({
       e.preventDefault();
       const d0 = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
       const d = d0 * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1);
-      rot.t += 0.5 * clamp(d, -480, 480);
+      // vertical wheel: scrolling down moves the cards up, like content
+      rot.t += (phone ? -0.5 : 0.5) * clamp(d, -480, 480);
       if (reduced) rot.x = rot.t;
     }, { passive: false });
     on(wall, "pointerdown", (e) => {
@@ -770,7 +928,7 @@ export default function SeaRingPortfolio({
     on(window, "pointermove", (e) => {
       if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      const dd = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+      const dd = phone ? dy : Math.abs(dx) >= Math.abs(dy) ? dx : dy;
       if (Math.abs(dd) > 4 && !dragMoved) {
         dragMoved = true;
         wall.classList.add("drag");
@@ -863,6 +1021,7 @@ export default function SeaRingPortfolio({
       raf = requestAnimationFrame(tick);
       const dt = Math.min(0.05, (now - last) / 1000);
       const k = Math.min(3, (now - last) / 16.67);
+      const stepMs = Math.min(100, now - last);
       last = now;
       const P = propsRef.current;
       if (viewRef.current !== lastView) {
@@ -873,7 +1032,8 @@ export default function SeaRingPortfolio({
       // intro clock
       if (!introDone) {
         if (useIntro && !revealed) {
-          formation = clamp((now - t0) / 2600);
+          tForm += stepMs;
+          formation = clamp(tForm / 2600);
           // odometer tween
           const t = clamp((now - odoT) / 650);
           odoCur = odoFrom + (odoTo - odoFrom) * (1 - Math.pow(1 - t, 3));
@@ -882,9 +1042,10 @@ export default function SeaRingPortfolio({
           if (formation >= 1 && posterLoaded >= total) startReveal(now);
         }
         if (revealed && useIntro) {
-          exp = EXPAND(clamp((now - tReveal) / 1900));
-          if (now - tReveal >= 1050) root.classList.add("entered");
-          if (now - tReveal >= 1900) {
+          tRev += stepMs;
+          exp = EXPAND(clamp(tRev / 1900));
+          if (tRev >= 1050) root.classList.add("entered");
+          if (tRev >= 1900) {
             introDone = true;
             interactiveOn = true;
             exp = 1;
@@ -902,8 +1063,9 @@ export default function SeaRingPortfolio({
         ease += ((hoverCard ? 0.2 : 1) - ease) * Math.min(1, 0.08 * k);
         if (!drag && !focusIn && !reduced && P.autoSpin) {
           const sp = num(P.spinSpeed, 0.3);
-          if (introDone) rot.t += sp * ease * k;
-          else rot.t += sp * (0.5 + 0.5 * exp) * clamp((78 - rot.t) / 20, 0, 1) * ease * k;
+          const dir = phone ? -1 : 1; // vertical wheel flows upward
+          if (introDone) rot.t += dir * sp * ease * k;
+          else rot.t += dir * sp * (0.5 + 0.5 * exp) * clamp((78 - Math.abs(rot.t)) / 20, 0, 1) * ease * k;
         }
         if (reduced) rot.x = rot.t;
         else stepSpring(rot, dt);
@@ -938,20 +1100,27 @@ export default function SeaRingPortfolio({
       const sites = propsRef.current.sites;
       const N2 = Math.max(1, sites.length);
       const e = exp;
-      // Phones get a tighter, deeper ring once it has opened: a smaller radius and closer camera so the
-      // side cards curve away, the front of the ring pushed toward the viewer, and a slight tilt so it
-      // reads as a rounded ring. Desktop keeps the original shape.
-      const endR = phone ? 1100 : 1800;
-      const endP = phone ? 520 : 760;
-      const endTilt = phone ? -8 : 0;
-      const endScale = phone ? 1.35 : 2.3;
-      const push = phone ? 260 * e : 0;
-      const tilt = -22 * (1 - e) + endTilt * e;
-      const tr = tilt * DEG;
+      // Phones: the ring turns about the HORIZONTAL axis, so the cards travel up and down (a vertical
+      // wheel) while each card stays landscape. It is also tighter and deeper once open: a smaller
+      // radius, a closer camera and the front of the ring pushed toward the viewer. Desktop keeps the
+      // original horizontal ring.
+      const vert = phone;
+      const PP = propsRef.current;
+      const spacing = clamp(num(PP.ringSpacing, 1), 0.4, 2.5);
+      const dep = clamp(num(PP.depth, 1), 0.3, 3);
+      const endR = (vert ? 560 : 1800) * spacing;
+      const endP = (vert ? 420 : 760) / dep;
+      const endTilt = 0;
+      const endScale = vert ? 1.05 : 2.3;
+      const push = vert ? 240 * dep * e : 0;
+      // the forming ring is leaned over: about X on desktop, about Y for the vertical wheel
+      const tilt = vert ? 0 : -22 * (1 - e);
+      const tiltV = vert ? 22 * (1 - e) + endTilt * e : 0;
+      const tr = (vert ? tiltV : tilt) * DEG;
       const radius = 460 + (endR - 460) * e;
-      const anchor = -radius * Math.sin(tr) + 460 * Math.sin(-22 * DEG) * (1 - e);
+      const anchor = vert ? 0 : -radius * Math.sin(tr) + 460 * Math.sin(-22 * DEG) * (1 - e);
       const persp = 1000 + (endP - 1000) * e;
-      const roll = -20 * (1 - e);
+      const roll = vert ? 16 * (1 - e) : -20 * (1 - e);
       const cardScale = 0.52 + (endScale - 0.52) * e * e;
       const wallScale = phone ? 0.8 : H <= 760 ? 0.9 : 1.1;
       const fit = Math.min(1.05, (W - 32) / 1240, (0.66 * H) / 800) / wallScale;
@@ -962,8 +1131,11 @@ export default function SeaRingPortfolio({
       const off = introOff * (1 - e) + anchor * A;
       const ix = 160 * Math.sin(roll * DEG) * A;
       const s = wallScale * (fit + (1 - fit) * e);
-      ring.style.transform = `translate3d(${ix}px,${off}px,${push}px) rotateZ(${roll}deg) rotateX(${tilt}deg) scale3d(${s},${s},${A})`;
+      ring.style.transform = vert
+        ? `translate3d(${ix}px,${off}px,${push}px) rotateZ(${roll}deg) rotateY(${tiltV}deg) scale3d(${s},${s},${A})`
+        : `translate3d(${ix}px,${off}px,${push}px) rotateZ(${roll}deg) rotateX(${tilt}deg) scale3d(${s},${s},${A})`;
       const rv = introDone ? rot.x : 0;
+      curveK = Math.round(e * 100) / 100;
       for (let slot = 0; slot < SLOTS; slot++) {
         const c = cardApi[slot];
         const raw = (360 * slot) / SLOTS + rv + 180;
@@ -979,7 +1151,8 @@ export default function SeaRingPortfolio({
         const sm = 1 - Math.pow(1 - i, 3);
         const l = -180 + n * sm;
         const cr = radius - (1 - sm) * a * 24;
-        const x = -Math.sin(l * DEG) * cr;
+        const x = vert ? 0 : -Math.sin(l * DEG) * cr;
+        const y = vert ? Math.sin(l * DEG) * cr : 0;
         const z = -Math.cos(l * DEG) * cr;
         const appear = Math.min(1, 2.5 * i);
         const hidden = (z + push) * Math.cos(tr) >= persp - 70 || (introDone && Math.abs(r) > 96);
@@ -989,10 +1162,13 @@ export default function SeaRingPortfolio({
           c.want = false;
         } else {
           if (el.style.display === "none") el.style.display = "";
-          el.style.transform = `translate3d(${x}px,0,${z}px) rotateY(${l}deg) scale(${cardScale})`;
+          el.style.transform = vert
+            ? `translate3d(0,${y}px,${z}px) rotateX(${l}deg) scale(${cardScale})`
+            : `translate3d(${x}px,0,${z}px) rotateY(${l}deg) scale(${cardScale})`;
           el.style.opacity = appear;
-          c.face.style.transform = z > (radius * radius) / persp ? "rotateY(180deg)" : "";
-          c.want = formation > 0.5 && Math.abs(r) <= 78 && !reduced && document.visibilityState === "visible";
+          c.face.style.transform = z > (radius * radius) / persp ? (vert ? "rotateX(180deg)" : "rotateY(180deg)") : "";
+          if (c.cm && c.ck !== curveK) applyCurve(c, curveK);
+          c.want = !c.face.classList.contains("curved") && exp > 0.9 && Math.abs(r) <= 78 && !reduced && document.visibilityState === "visible";
         }
         // hover tilt springs
         if (!settled(c.rx) || !settled(c.ry) || !settled(c.tz)) {
@@ -1020,7 +1196,10 @@ export default function SeaRingPortfolio({
       c.vid.addEventListener("error", () => c.vid.classList.remove("on"));
       c.img.addEventListener("error", () => {
         const st = sitesNowEarly()[slotSite[e]];
-        if (st && c.img.getAttribute("src") !== st.ph) c.img.src = st.ph;
+        if (st && c.img.getAttribute("src") !== st.ph) {
+          c.img.src = st.ph;
+          c.el.style.setProperty("--poster", `url("${st.ph}")`);
+        }
       });
     });
 
@@ -1048,7 +1227,7 @@ export default function SeaRingPortfolio({
   // keep the ring's slots in step with an edited card list or media mode
   useEffect(() => {
     if (apiRef.current.sync) apiRef.current.sync();
-  }, [sites]);
+  }, [sites, cardHeight, cardWidthScale, cornerRadius, curve, mobileCurve, curveDirection, curveShade]);
   useEffect(() => {
     if (apiRef.current.syncSea) apiRef.current.syncSea();
   }, [mediaMode, view, seaVideo]);
@@ -1155,7 +1334,7 @@ export default function SeaRingPortfolio({
       className="nrs"
       data-nav={showNav ? "1" : "0"}
       data-focus={hover && hover.world !== "ai" ? hover.world : undefined}
-      style={{ ...style, "--paper": paper, "--ink": ink, "--accent": accent, "--btn": buttonColor }}
+      style={{ ...style, "--cr": `${clamp(num(cornerRadius, 16), 0, 60)}px`, "--paper": paper, "--ink": ink, "--accent": accent, "--btn": buttonColor }}
     >
       <style>{CSS}</style>
 
@@ -1226,13 +1405,15 @@ export default function SeaRingPortfolio({
                   {Array.from({ length: SLOTS }, (_, e) => {
                     const idx = ((e + Math.min(3, N - 1)) % N + N) % N;
                     const s = sites[idx];
-                    const w = 160 * (s ? s.ratio : 16 / 9);
+                    const chh = clamp(num(cardHeight, 160), 60, 420);
+                    const w = chh * CARD_RATIO * clamp(num(cardWidthScale, 1), 0.4, 2);
                     const wc = WORLDS[s ? s.world : "brand"];
                     return (
-                      <a key={e} className="card" data-k="card" data-world={s ? s.world : "brand"} href={s && s.link ? s.link : "#"} target={s && s.link ? "_blank" : undefined} rel="noopener" style={{ width: w, left: -w / 2, "--wc": wc.color, "--on": wc.on }}>
+                      <a key={e} className="card" data-k="card" data-world={s ? s.world : "brand"} href={s && s.link ? s.link : "#"} target={s && s.link ? "_blank" : undefined} rel="noopener" style={{ width: w, left: -w / 2, height: chh, top: -chh / 2, "--wc": wc.color, "--on": wc.on }}>
                         <div className="tilt">
                           <div className="cframe" />
                           <div className="face">
+                            <div className="curve" />
                             <img src={s ? s.poster : ""} alt="" draggable="false" />
                             <video muted loop playsInline preload="none" />
                             <div className="chip"><i /><span>{s ? "No. " + String(s.num).padStart(2, "0") : ""}</span></div>
