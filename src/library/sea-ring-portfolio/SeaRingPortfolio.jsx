@@ -31,7 +31,27 @@ const DEFAULT_SENTENCE =
 const DEFAULT_STATS = ["11.4M+ | PLAYS", "38.2K | COMMUNITY", "24.9K | MEMBERS"];
 const DEFAULT_COMPANIES = ["Fernway", "Quill Labs"];
 // "Title | video | poster | width x height | world | link slug"
+// "Title | video | poster | width x height | world | link slug" (the size no longer matters: every card shares one box)
 const DEFAULT_CARDS = [
+  "Look Circle |  | https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1000&q=75 | 1600x900 | brand | look-circle",
+  "Video Studio |  | https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1000&q=75 | 1440x810 | build | video-studio",
+  "Balloon Drop |  | https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1000&q=75 | 1600x900 | brand | balloon-drop",
+  "Fox Couture |  | https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=1000&q=75 | 1440x900 | brand | fox-couture",
+  "Laptop Portfolio |  | https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1000&q=75 | 1440x810 | build | laptop-portfolio",
+  "Ink Portfolio |  | https://images.unsplash.com/photo-1487958449943-2429e8be8625?auto=format&fit=crop&w=1000&q=75 | 1440x810 | build | ink-portfolio",
+  "Clothing Rail |  | https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1000&q=75 | 1500x1000 | brand | clothing-rail",
+  "Spin Product |  | https://images.unsplash.com/photo-1511818966892-d7d671e672a2?auto=format&fit=crop&w=1000&q=75 | 1500x1000 | brand | spin-product",
+  "Sphere Gallery |  | https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1000&q=75 | 1440x810 | learn | sphere-gallery",
+  "Video Editor |  | https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1000&q=75 | 1440x810 | build | video-editor",
+  "Card Story |  | https://images.unsplash.com/photo-1493246507139-91e8fad9978e?auto=format&fit=crop&w=1000&q=75 | 1440x900 | learn | card-story",
+  "Year Recap |  | https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1000&q=75 | 1440x900 | learn | year-recap",
+  "Future Fashion |  | https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?auto=format&fit=crop&w=1000&q=75 | 1440x900 | brand | future-fashion",
+  "VHS Archive |  | https://images.unsplash.com/photo-1472214103451-9374bd1c798e?auto=format&fit=crop&w=1000&q=75 | 1600x900 | learn | vhs-archive",
+  "Moss Island |  | https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1000&q=75 | 1600x900 | build | moss-island",
+  "Outfit Carousel |  | https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1000&q=75 | 1600x900 | brand | outfit-carousel",
+];
+// the same sites with their clips, used when Media is set to videos and the card list is still the default
+const DEFAULT_VIDEO_CARDS = [
   "Look Circle | aaaf/look-circle-hero.mp4 | hf_20261111_034848_928e6733-ce60-48f4-9a65-14dc76a1d74b | 1600x900 | brand | look-circle",
   "Video Studio | aaaf/kolibrie-landing.mp4 | hf_20261110_232427_5e9a291a-5c3e-4f0e-9506-06fedc0020f4 | 1440x810 | build | video-studio",
   "Balloon Drop | aaaf/balloon-drop-hero-edge.mp4 | hf_20261109_030427_0961b20a-ba6b-4094-8ea2-de5916dfa0b3 | 1600x900 | brand | balloon-drop",
@@ -418,7 +438,7 @@ export default function SeaRingPortfolio({
   cards = DEFAULT_CARDS,
   seaImage = SEA_IMG,
   seaVideo = SEA_VID,
-  mediaMode = "video",
+  mediaMode = "images",
   cardImages = DEFAULT_NONE,
   cardVideos = DEFAULT_NONE,
   cardHeight = 160,
@@ -458,7 +478,10 @@ export default function SeaRingPortfolio({
   // media mode changes (which reloads every poster). The loader and the engine are rebuilt on it.
   const [runKey, setRunKey] = useState(0);
 
-  const sites = useMemo(() => parseCards(cards, mediaMode, cardImages, cardVideos), [cards, mediaMode, cardImages, cardVideos]);
+  const sites = useMemo(() => {
+    const isDefault = Array.isArray(cards) && cards.join("|") === DEFAULT_CARDS.join("|");
+    return parseCards(mediaMode === "video" && isDefault ? DEFAULT_VIDEO_CARDS : cards, mediaMode, cardImages, cardVideos);
+  }, [cards, mediaMode, cardImages, cardVideos]);
   const lines = useMemo(() => parseSentence(sentence), [sentence]);
   const statList = useMemo(
     () => (Array.isArray(stats) ? stats : []).map((l) => String(l).split("|").map((x) => x.trim())).filter((p) => p[0]).slice(0, 4),
@@ -1064,8 +1087,7 @@ export default function SeaRingPortfolio({
         if (!drag && !focusIn && !reduced && P.autoSpin) {
           const sp = num(P.spinSpeed, 0.3);
           const dir = phone ? -1 : 1; // vertical wheel flows upward
-          if (introDone) rot.t += dir * sp * ease * k;
-          else rot.t += dir * sp * (0.5 + 0.5 * exp) * clamp((78 - Math.abs(rot.t)) / 20, 0, 1) * ease * k;
+          if (revealed) rot.t += dir * sp * (introDone ? 1 : 0.5 + 0.5 * exp) * ease * k;
         }
         if (reduced) rot.x = rot.t;
         else stepSpring(rot, dt);
@@ -1134,14 +1156,16 @@ export default function SeaRingPortfolio({
       ring.style.transform = vert
         ? `translate3d(${ix}px,${off}px,${push}px) rotateZ(${roll}deg) rotateY(${tiltV}deg) scale3d(${s},${s},${A})`
         : `translate3d(${ix}px,${off}px,${push}px) rotateZ(${roll}deg) rotateX(${tilt}deg) scale3d(${s},${s},${A})`;
-      const rv = introDone ? rot.x : 0;
+      // the ring starts turning the moment the opening begins (rot.x is 0 until then), so the motion
+      // carries on from the loader into the opened ring with no jump or pause
+      const rv = revealed ? rot.x : 0;
       curveK = Math.round(e * 100) / 100;
       for (let slot = 0; slot < SLOTS; slot++) {
         const c = cardApi[slot];
         const raw = (360 * slot) / SLOTS + rv + 180;
         const a0 = Math.floor(raw / 360);
         const r = mod(raw, 360) - 180;
-        if (introDone) {
+        if (revealed) {
           const want = mod(slot - a0 * SLOTS + Math.min(3, N2 - 1), N2);
           if (slotSite[slot] !== want) applySite(slot, want);
         }
@@ -1160,6 +1184,7 @@ export default function SeaRingPortfolio({
         if (hidden) {
           if (el.style.display !== "none") el.style.display = "none";
           c.want = false;
+          c.pre = false;
         } else {
           if (el.style.display === "none") el.style.display = "";
           el.style.transform = vert
@@ -1168,7 +1193,9 @@ export default function SeaRingPortfolio({
           el.style.opacity = appear;
           c.face.style.transform = z > (radius * radius) / persp ? (vert ? "rotateX(180deg)" : "rotateY(180deg)") : "";
           if (c.cm && c.ck !== curveK) applyCurve(c, curveK);
-          c.want = !c.face.classList.contains("curved") && exp > 0.9 && Math.abs(r) <= 78 && !reduced && document.visibilityState === "visible";
+          const vOk = !c.face.classList.contains("curved") && exp > 0.9 && !reduced && document.visibilityState === "visible";
+          c.pre = vOk && Math.abs(r) <= 135; // start loading before the card turns to face you, never mid-motion
+          c.want = vOk && Math.abs(r) <= 78;
         }
         // hover tilt springs
         if (!settled(c.rx) || !settled(c.ry) || !settled(c.tz)) {
@@ -1178,7 +1205,7 @@ export default function SeaRingPortfolio({
           c.tilt.style.transform = `translateZ(${c.tz.x}px) rotateX(${c.rx.x}deg) rotateY(${c.ry.x}deg)`;
         }
         // preview videos: play only when on screen
-        if (c.want && !c.vidSrc) {
+        if (c.pre && !c.vidSrc) {
           const st = sites[slotSite[slot]];
           if (st && st.video) {
             c.vidSrc = st.video;
@@ -1415,7 +1442,7 @@ export default function SeaRingPortfolio({
                           <div className="face">
                             <div className="curve" />
                             <img src={s ? s.poster : ""} alt="" draggable="false" />
-                            <video muted loop playsInline preload="none" />
+                            <video muted loop playsInline preload="auto" />
                             <div className="chip"><i /><span>{s ? "No. " + String(s.num).padStart(2, "0") : ""}</span></div>
                             <div className="dim" />
                             <div className="bar">
