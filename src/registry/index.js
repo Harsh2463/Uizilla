@@ -26,6 +26,7 @@ import text3DFlip from "../library/text-3d-flip/meta.jsx";
 import scrollHighlight from "../library/scroll-highlight/meta.jsx";
 import strideBarSite from "../library/stride-bar-site/meta.jsx";
 import videoRibbon from "../library/video-ribbon/meta.jsx";
+import seaRingPortfolio from "../library/sea-ring-portfolio/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -53,6 +54,7 @@ export const components = [
   scrollHighlight,
   strideBarSite,
   videoRibbon,
+  seaRingPortfolio,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
