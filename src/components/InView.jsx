@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 // Mounts children only while near the viewport, so a long grid of
 // animated cards never runs dozens of animations at once.
-export default function InView({ children, className = "", style }) {
+export default function InView({ children, className = "", style, placeholder = null }) {
   const ref = useRef(null);
   const [visible, setVisible] = useState(false);
 
@@ -19,7 +19,7 @@ export default function InView({ children, className = "", style }) {
 
   return (
     <div ref={ref} className={className} style={style}>
-      {visible ? children : null}
+      {visible ? children : placeholder}
     </div>
   );
 }

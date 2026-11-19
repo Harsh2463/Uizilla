@@ -77,7 +77,7 @@ const FONT = "Arial, Helvetica, sans-serif";
  * particles. A photo without transparency turns into a solid rectangle of
  * points, which is a different (and usually worse looking) effect. */
 const DEFAULT_IMAGE =
-  "https://ik.imagekit.io/Harsh2463/jackets/Futuristic%20Orange-Black%20Cyborg%20Armor.png";
+  "https://ik.imagekit.io/Harsh2463/jackets/Futuristic%20Orange-Black%20Cyborg%20Armor.png?tr=f-webp,q-85";
 
 /* ------------------------------------------------------------------ shaders */
 

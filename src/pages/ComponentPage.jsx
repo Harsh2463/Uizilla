@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getComponent } from "../registry/index.js";
+import { useComponent } from "../registry/index.js";
+import { PageSkeleton } from "../components/Skeleton.jsx";
 import NotFound from "./NotFound.jsx";
 
 function downloadFile(name, text) {
@@ -35,11 +36,12 @@ function CopyButton({ text, label = "Copy" }) {
 
 export default function ComponentPage() {
   const { slug } = useParams();
-  const c = getComponent(slug);
+  const { c, status } = useComponent(slug, { withSource: true });
+  if (status === "loading") return <PageSkeleton />;
   if (!c) return <NotFound />;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+    <div className="mx-auto w-full max-w-[1800px] px-4 py-8 sm:px-8 2xl:px-12 sm:py-12">
       <Link
         to="/"
         className="text-sm text-[var(--muted)] transition-colors hover:text-white"

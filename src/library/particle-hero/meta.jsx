@@ -2,7 +2,7 @@ import ParticleHero from "./ParticleHero.jsx";
 import source from "./ParticleHero.jsx?raw";
 
 const DEFAULT_IMAGE =
-  "https://ik.imagekit.io/Harsh2463/jackets/Futuristic%20Orange-Black%20Cyborg%20Armor.png";
+  "https://ik.imagekit.io/Harsh2463/jackets/Futuristic%20Orange-Black%20Cyborg%20Armor.png?tr=f-webp,q-85";
 
 export default {
   slug: "particle-hero",

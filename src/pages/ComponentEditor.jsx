@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getComponent } from "../registry/index.js";
+import { useComponent } from "../registry/index.js";
 import { bakeDefaults, downloadFile } from "../lib/bake.js";
 import NotFound from "./NotFound.jsx";
 import {
@@ -23,7 +23,13 @@ const DEVICES = [
 
 export default function ComponentEditor() {
   const { slug } = useParams();
-  const c = getComponent(slug);
+  const { c, status } = useComponent(slug, { withSource: true });
+  if (status === "loading")
+    return (
+      <div className="grid h-dvh place-items-center text-sm text-[var(--muted)]" role="status">
+        Loading editor…
+      </div>
+    );
   if (!c || !c.controls) return <NotFound />;
   return <Editor key={slug} c={c} />;
 }
