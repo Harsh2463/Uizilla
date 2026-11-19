@@ -72,6 +72,10 @@ const CSS = `
 .of .logo{position:absolute;left:50%;top:26px;transform:translateX(-50%);font-family:"UnifrakturMaguntia",serif;font-weight:400;font-size:64px;line-height:1;letter-spacing:.01em;white-space:nowrap}
 .of .contact{position:absolute;right:46px;top:46px}
 .of .rail{position:absolute;left:-80px;right:-80px;top:254px;height:12px;border-radius:6px;background:linear-gradient(#fafafa 0%,#b9bcc1 28%,#5d6066 55%,#a9adb3 78%,#e6e7e9 100%);box-shadow:0 10px 18px rgba(0,0,0,.45)}
+/* with a rail narrower than the section its two end caps show (a full-width rail runs off both edges) */
+.of .rail.caps::before,.of .rail.caps::after{content:"";position:absolute;top:-9px;width:16px;height:30px;border-radius:5px;background:linear-gradient(90deg,#8d9096,#f3f3f4 45%,#7a7d83)}
+.of .rail.caps::before{left:-14px}
+.of .rail.caps::after{right:-14px}
 .of .rack{position:absolute;left:0;top:0;width:1500px;height:1000px;touch-action:pan-y}
 .of.drag .rack,.of.drag .g{cursor:grabbing}
 /* the tall composition (phones, portrait tablets): bigger type, a shorter rail, the garments and the detail view stacked vertically */
@@ -141,7 +145,7 @@ function buildHtml(P) {
   <div class="about ui dim" data-k="about"></div>
   <div class="logo dim" data-k="logo"></div>
   <div class="contact ui dim dimmer" data-k="contact"></div>
-  <div class="rail dim"></div>
+  <div class="rail dim" data-k="rail"></div>
   <div class="rack dim" data-k="rack"></div>
   <div class="cap dimmer" data-k="cap"><b data-k="capn"></b><span data-k="capp"></span></div>
   <button class="avail pill ui dim dimmer" data-k="avail"></button>
@@ -169,6 +173,7 @@ export default function ClothingFlip({
   driftSpeed = 48,
   spacing = 150,
   garmentSize = 100,
+  railWidth = 100,
   frontSheet = FRONT_SHEET,
   sideSheet = SIDE_SHEET,
   background = "#0b0b0c",
@@ -179,7 +184,7 @@ export default function ClothingFlip({
 }) {
   const rootRef = useRef(null);
   const propsRef = useRef({});
-  propsRef.current = { garmentSize, spacing, driftSpeed, brand, aboutLabel, contactLabel, products, marquee, availabilityLabel, closeLabel, frontSheet, sideSheet };
+  propsRef.current = { railWidth, garmentSize, spacing, driftSpeed, brand, aboutLabel, contactLabel, products, marquee, availabilityLabel, closeLabel, frontSheet, sideSheet };
   const apiRef = useRef({});
 
   useLayoutEffect(() => {
@@ -210,6 +215,7 @@ export default function ClothingFlip({
     let drift = 0; // how far the rail has travelled, in artboard px
     let speed = 0; // current speed, easing toward the target
     let builtKey = "";
+    let railInset = 0; // artboard px between the section edge and each end of the rail
     let gTop = 0;
     let artK = 1; // artboard scale, to turn screen px into artboard px
     let dragging = false;
@@ -222,6 +228,7 @@ export default function ClothingFlip({
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // garment size (a factor); the spacing and the parting gap follow it, so the gaps keep their proportion
     const sz = () => Math.max(0.5, Math.min(1.6, num(P().garmentSize, 100) / 100));
+    const railPct = () => Math.max(30, Math.min(100, num(P().railWidth, 100)));
     const spacing = () => Math.max(60, Math.min(500, num(P().spacing, 150))) * sz();
 
     const prod = (k) => {
@@ -303,8 +310,21 @@ export default function ClothingFlip({
       });
       return best;
     };
+    // the rail bar: full width runs off both edges; narrower, it shows its end caps and the hoodies stay on it
+    const applyRail = () => {
+      const pct = railPct();
+      const full = pct >= 100;
+      railInset = full ? 0 : (L.W * (1 - pct / 100)) / 2;
+      const rail = q("rail");
+      rail.style.left = full ? "-80px" : `${railInset}px`;
+      rail.style.right = full ? "-80px" : `${railInset}px`;
+      rail.classList.toggle("caps", !full);
+      // hoodies slide off and on 10px inside each end of the bar, never right at the end cap
+      const pad = railInset + 10;
+      rack.style.clipPath = full ? "none" : `inset(-300px ${pad}px -300px ${pad}px)`;
+    };
     const buildRack = () => {
-      builtKey = `${spacing()}|${sz()}|${L.W}`;
+      builtKey = `${spacing()}|${sz()}|${L.W}|${railPct()}`;
       const gw = L.GW * sz();
       const gh = L.GH * sz();
       T = Math.max(N, Math.ceil((L.W + gw * 1.3) / spacing()));
@@ -318,6 +338,7 @@ export default function ClothingFlip({
         g.style.marginLeft = `${-gw / 2}px`;
         g.style.top = `${gTop}px`;
       });
+      applyRail();
       cap.style.top = `${gTop + gh + 16}px`;
       q("avail").style.top = `${Math.max(L.AV, gTop + gh + 86)}px`;
       vx = G.map(() => 0);
@@ -405,6 +426,8 @@ export default function ClothingFlip({
         root.classList.toggle("pt", m === "port");
         art.style.width = `${L.W}px`;
         art.style.height = `${L.H}px`;
+        rack.style.width = `${L.W}px`; // the rack layer always covers the whole artboard, so the rail end clip and the pointer area match it
+        rack.style.height = `${L.H}px`;
         buildRack();
       }
       const k = Math.min(cw / L.W, ch / L.H);
@@ -438,7 +461,8 @@ export default function ClothingFlip({
     const inTrail = (e) => {
       const rc = art.getBoundingClientRect();
       const y = (e.clientY - rc.top) / artK;
-      return y >= gTop - 12 && y <= gTop + L.GH * sz() + 12;
+      const x = (e.clientX - rc.left) / artK;
+      return y >= gTop - 12 && y <= gTop + L.GH * sz() + 12 && x >= railInset && x <= L.W - railInset;
     };
     offs.push(
       listen(rack, "pointermove", (e) => {
@@ -554,7 +578,7 @@ export default function ClothingFlip({
     fit();
     raf = requestAnimationFrame(frame);
     apiRef.current.sync = () => {
-      if (builtKey !== `${spacing()}|${sz()}|${L.W}`) buildRack();
+      if (builtKey !== `${spacing()}|${sz()}|${L.W}|${railPct()}`) buildRack();
       writeStatic();
     };
 
@@ -571,7 +595,7 @@ export default function ClothingFlip({
   // keep texts and sprite sheets in step with edited props (the engine owns the DOM)
   useEffect(() => {
     if (apiRef.current.sync) apiRef.current.sync();
-  }, [garmentSize, spacing, brand, aboutLabel, contactLabel, products, marquee, availabilityLabel, closeLabel, frontSheet, sideSheet]);
+  }, [railWidth, garmentSize, spacing, brand, aboutLabel, contactLabel, products, marquee, availabilityLabel, closeLabel, frontSheet, sideSheet]);
 
   return (
     <>
