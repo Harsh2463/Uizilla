@@ -1,0 +1,13 @@
+/* Colours and the font for the whole page. The background itself shifts to each
+   laptop's own tint (see `tint` in content.js); these are the fixed parts. */
+.ml {
+  --ml-ink: #14161a;            /* main text, black buttons */
+  --ml-muted: #6f747c;          /* secondary text */
+  --ml-card: rgba(255, 255, 255, 0.66);   /* card surface */
+  --ml-card-solid: #ffffff;
+  --ml-line: rgba(20, 22, 26, 0.08);
+  --ml-lime: #dff56a;           /* the primary call-to-action */
+  --ml-lime-ink: #14161a;
+  --ml-radius: 28px;
+  --ml-font: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+}

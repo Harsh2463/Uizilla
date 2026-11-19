@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -21,12 +21,14 @@ export default function Layout() {
           <Link to="/" className="text-[15px] font-semibold tracking-tight">
             Motion Library
           </Link>
-          <Link
-            to="/"
-            className="text-sm text-[var(--muted)] transition-colors hover:text-white"
-          >
-            Components
-          </Link>
+          <nav className="flex items-center gap-5 text-sm">
+            <NavLink to="/" end className={({ isActive }) => "transition-colors hover:text-white " + (isActive ? "text-white" : "text-[var(--muted)]")}>
+              Components
+            </NavLink>
+            <NavLink to="/templates" className={({ isActive }) => "transition-colors hover:text-white " + (isActive ? "text-white" : "text-[var(--muted)]")}>
+              Templates
+            </NavLink>
+          </nav>
         </div>
       </header>
 

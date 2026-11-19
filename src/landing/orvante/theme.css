@@ -1,0 +1,18 @@
+/* Colours and fonts for the whole page. Change a value here and every
+   section follows — nothing else needs touching. */
+.ov {
+  --ov-paper: #dadada;          /* hero background */
+  --ov-ink: #111111;            /* hero text, buttons, the black pills */
+  --ov-black: #000000;          /* lower sections */
+  --ov-text: #f4f4f4;           /* text on black */
+  --ov-grey: #6f6f6f;           /* statement start colour, muted text */
+  --ov-fill: #f4f4f4;           /* statement end colour */
+  --ov-frame: #cdcdcd;          /* hero stats frame */
+  --ov-card-light: #d6d6d6;     /* avatar card */
+  --ov-card-dark: #262626;      /* awards card */
+  --ov-line: rgba(255, 255, 255, 0.28);   /* panel border */
+  --ov-hairline: rgba(255, 255, 255, 0.14);
+
+  --ov-font-ui: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --ov-font-display: "Archivo", "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+}
