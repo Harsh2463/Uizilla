@@ -21,11 +21,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 const CF = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/";
 const R2 = "https://pub-86dc5b5484314368ac5436a674b0d919.r2.dev/";
 const proxy = (u, w) => `https://images.higgs.ai/?default=1&output=webp&url=${encodeURIComponent(u)}&w=${w}&q=85`;
-const SEA_IMG = proxy(CF + "hf_20261111_224417_17e8d78c-9384-4a50-93b4-92510f1957db.png", 2048);
-const SEA_VID = CF + "hf_20261111_232613_bf108dd9-dc98-4729-9163-748475f20b61.mp4";
 const FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=Newsreader:wght@300..500&display=swap";
+  "https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=Newsreader:wght@300..500&family=Antonio:wght@600;700&display=swap";
 
+const DEFAULT_HEADLINE = ["THE FUTURE OF", "ENTERTAINMENT"];
 // "Title | video | poster | width x height | world | link slug"
 // "Title | video | poster | width x height | world | link slug" (the size no longer matters: every card shares one box)
 const DEFAULT_CARDS = [
@@ -105,18 +104,6 @@ function placeholderPoster(title, i, world, ratio) {
     "<text x='" + Math.round(w * 0.08) + "' y='" + Math.round(h * 0.94) + "' font-family='monospace' font-size='" + Math.round(h * 0.04) + "' letter-spacing='3' fill='rgba(255,255,255,.55)'>PLACEHOLDER</text></svg>";
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
-const SEA_PH =
-  "data:image/svg+xml;utf8," +
-  encodeURIComponent(
-    "<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='900' viewBox='0 0 1600 900'><defs>" +
-      "<linearGradient id='s' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#9fd6ea'/><stop offset='1' stop-color='#eaf7fb'/></linearGradient>" +
-      "<linearGradient id='w' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#59bfe0'/><stop offset='1' stop-color='#1f7fa6'/></linearGradient>" +
-      "<radialGradient id='u' cx='.7' cy='.18' r='.5'><stop offset='0' stop-color='#fff' stop-opacity='.95'/><stop offset='1' stop-color='#fff' stop-opacity='0'/></radialGradient></defs>" +
-      "<rect width='1600' height='900' fill='url(#s)'/><rect width='1600' height='900' fill='url(#u)'/>" +
-      "<rect y='420' width='1600' height='480' fill='url(#w)'/>" +
-      "<g fill='none' stroke='#fff' stroke-opacity='.35' stroke-width='3'><path d='M0 520q100-24 200 0t200 0 200 0 200 0 200 0 200 0 200 0 200 0'/><path d='M0 620q100-30 200 0t200 0 200 0 200 0 200 0 200 0 200 0 200 0'/><path d='M0 740q100-36 200 0t200 0 200 0 200 0 200 0 200 0 200 0 200 0'/></g>" +
-      "<g fill='#fff'><circle cx='120' cy='860' r='34'/><circle cx='210' cy='880' r='26'/><circle cx='330' cy='866' r='30'/><circle cx='1250' cy='872' r='32'/><circle cx='1390' cy='860' r='36'/><circle cx='1500' cy='884' r='28'/></g></svg>"
-  );
 const GRAIN = "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")";
 
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -192,7 +179,7 @@ function parseCards(list, mode, images, videos) {
 
 
 const CSS = `
-.nrs{--paper:#0A0E11;--deep:#111920;--surface:#141C22;--ink:#EEF4F6;--soft:#9FB4BF;--muted:#647C8A;--line:rgba(238,244,246,.14);--accent:#3AA8D0;--btn:#1E86AC;--btn2:#2597C0;--sage:#9ED8E4;--night:#05090C;--onsky:#0E2A3B;--ease:cubic-bezier(.22,1,.36,1);--serif:"Newsreader",Georgia,serif;--mono:"Geist Mono",ui-monospace,monospace;--sans:"Geist",system-ui,sans-serif;position:relative;width:100%;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;color-scheme:dark}
+.nrs{--paper:#030204;--deep:#030204;--surface:#141C22;--ink:#EEF4F6;--soft:#9FB4BF;--muted:#647C8A;--line:rgba(238,244,246,.14);--accent:#772DFF;--btn:#1E86AC;--btn2:#2597C0;--sage:#9ED8E4;--night:#05090C;--onsky:#0E2A3B;--ease:cubic-bezier(.22,1,.36,1);--serif:"Newsreader",Georgia,serif;--mono:"Geist Mono",ui-monospace,monospace;--sans:"Geist",system-ui,sans-serif;position:relative;width:100%;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;color-scheme:dark}
 .nrs *{box-sizing:border-box}
 .nrs a{color:inherit;text-decoration:none}
 .nrs button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
@@ -206,21 +193,29 @@ const CSS = `
 .nrs.ready .wmRest,.nrs.ready .wmFirst,.nrs.noIntro .wmRest,.nrs.noIntro .wmFirst{opacity:1}
 .nrs[data-nav="0"] .nav{display:none}
 /* views */
-.nrs .view{position:absolute;inset:0;display:none;flex-direction:column;padding-top:calc(var(--u)*92);overflow-x:hidden;overflow-y:auto;scrollbar-width:none}
+.nrs .view{position:absolute;inset:0;display:none;flex-direction:column;padding-top:0;overflow-x:hidden;overflow-y:auto;scrollbar-width:none}
 .nrs .view.home{overflow:hidden}
 .nrs .view.on{display:flex}
 .nrs .stage{flex:1;min-height:0;display:flex;flex-direction:column}
 .nrs[data-nav="0"] .view{padding-top:0}
 .nrs[data-nav="0"] .home .stage{padding-top:calc(var(--u)*18)}
 /* frame */
-.nrs .frame{position:relative;flex:1;min-height:0;margin:0 calc(var(--u)*16) calc(var(--u)*22);border-radius:calc(var(--u)*22);background:var(--deep);isolation:isolate;overflow:hidden;clip-path:inset(0 round calc(var(--u)*22));transition:clip-path 1.1s cubic-bezier(.5,0,.1,1)}
+.nrs .frame{position:relative;flex:1;min-height:0;margin:calc(var(--u)*16) calc(var(--u)*16) calc(var(--u)*22);border-radius:calc(var(--u)*22);background:var(--deep);isolation:isolate;overflow:hidden;clip-path:inset(0 round calc(var(--u)*22));transition:clip-path 1.1s cubic-bezier(.5,0,.1,1)}
 .nrs .frame.open{overflow:visible;background:transparent;z-index:101;clip-path:inset(var(--ft) var(--fr) var(--fb) var(--fl) round 0);transition:none}
 .nrs .frame.enter{z-index:101;background:transparent}
-.nrs .scene{position:absolute;inset:-4%;z-index:0;will-change:transform;transition:opacity .9s}
+.nrs .scene{position:absolute;inset:-4%;z-index:0;will-change:transform;transition:opacity .9s;container-type:size}
 .nrs.intro:not(.revealed) .home .scene{opacity:0}
-.nrs .scene img,.nrs .scene video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 62%}
-.nrs .scene video{opacity:0;transition:opacity .8s}
-.nrs .scene video.on{opacity:1}
+/* violet radial glow over the full height, fading to black at the sides */
+/* a perfectly round glow: its diameter is the smaller of 60% of the width and the full height, so it stays a complete circle at any size (the diameter is the smaller of 80% of the width and 94% of the height of the panel, so it follows the panel height and never gets cut off) */
+.nrs .glow{position:absolute;left:50%;top:50%;width:min(80cqw,94cqh);aspect-ratio:1/1;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle closest-side,color-mix(in srgb,var(--glow) 45%,white),transparent 100%) center/38% 38% no-repeat,radial-gradient(circle closest-side,var(--glow) 0%,color-mix(in srgb,var(--glow) 78%,black) 30%,color-mix(in srgb,var(--glow) 38%,black) 55%,color-mix(in srgb,var(--glow) 20%,black) 78%,var(--paper) 98%)}
+/* big bold headline, centred horizontally and vertically as one tight block and lit by the glow behind it */
+.nrs .bt{position:absolute;inset:0;z-index:1;pointer-events:none;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:calc(var(--bh) * 7);opacity:0;transition:opacity .9s}
+.nrs.revealed .bt,.nrs.noIntro .bt{opacity:1}
+.nrs .bt span{display:block;text-align:center;font-family:"Antonio","Big Shoulders Display","Barlow Condensed",Impact,sans-serif;font-weight:700;text-transform:uppercase;line-height:.86;letter-spacing:.01em;white-space:nowrap;font-size:min(calc(var(--bw) * 11.8),calc(var(--bh) * 28));background-image:linear-gradient(90deg,color-mix(in srgb,var(--htxt) 30%,black) 0%,color-mix(in srgb,var(--htxt) 60%,black) 20%,color-mix(in srgb,var(--htxt) 85%,black) 40%,var(--htxt) 50%,color-mix(in srgb,var(--htxt) 85%,black) 60%,color-mix(in srgb,var(--htxt) 60%,black) 80%,color-mix(in srgb,var(--htxt) 30%,black) 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+/* phones: the circle spans the full width of the screen (height follows, so it stays round) and the headline is larger */
+.nrs.sm .glow{width:100cqw}
+.nrs.sm .bt span{font-size:calc(var(--bw) * 14.5)}
+.nrs .petal,.nrs .mote,.nrs .mist{display:none}
 .nrs .grain{position:absolute;inset:-4%;background-image:${GRAIN};opacity:.07;mix-blend-mode:screen;pointer-events:none;animation:nrsJit .9s steps(5) infinite}
 @keyframes nrsJit{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}60%{transform:translate(-1%,-2%)}80%{transform:translate(3%,1%)}100%{transform:translate(0,0)}}
 .nrs .fx{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .9s}
@@ -295,14 +290,13 @@ const CSS = `
 .nrs .fly{position:absolute;z-index:150;left:0;top:0;font-family:var(--serif);letter-spacing:-.03em;line-height:.95;transform-origin:0 0;white-space:nowrap;pointer-events:none;color:var(--ink)}
 /* phone */
 .nrs.sm .nav{height:64px;padding:0 16px}
-.nrs.sm .view{padding-top:64px}
 .nrs.sm .wm{font-size:24px}
 .nrs.sm .wall{touch-action:pan-x pinch-zoom}
 /* phones: the small white drifting petals read as stray white squares next to the cards, so they are hidden */
 .nrs.sm .petal{display:none}
 .nrs.sm .face,.nrs.sm .face.curved{-webkit-box-reflect:none !important;box-shadow:none !important}
 .nrs.sm .cframe{box-shadow:none}
-.nrs.sm .frame{margin:0 10px 10px;border-radius:20px;clip-path:inset(0 round 20px)}
+.nrs.sm .frame{margin:10px 10px 10px;border-radius:20px;clip-path:inset(0 round 20px)}
 .nrs.sm .frame.open{clip-path:inset(var(--ft) var(--fr) var(--fb) var(--fl) round 0)}
 @media (prefers-reduced-motion:reduce){.nrs *{animation:none!important;transition:none!important}.nrs .loader{display:none}}
 `;
@@ -310,8 +304,7 @@ const CSS = `
 export default function SeaRingPortfolio({
   name = "studio",
   cards = DEFAULT_CARDS,
-  seaImage = SEA_IMG,
-  seaVideo = SEA_VID,
+  headline = DEFAULT_HEADLINE,
   mediaMode = "images",
   cardImages = DEFAULT_NONE,
   cardVideos = DEFAULT_NONE,
@@ -329,9 +322,11 @@ export default function SeaRingPortfolio({
   intro = true,
   autoSpin = true,
   spinSpeed = 0.3,
-  paper = "#0A0E11",
+  paper = "#030204",
   ink = "#EEF4F6",
-  accent = "#3AA8D0",
+  accent = "#772DFF",
+  glowColor = "#772DFF",
+  headlineColor = "#C19AFF",
   interactive = true,
   style = {},
 }) {
@@ -1125,7 +1120,7 @@ export default function SeaRingPortfolio({
   }, [sites, cardHeight, cardWidthScale, cornerRadius, curve, mobileCurve, curveDirection, curveShade]);
   useEffect(() => {
     if (apiRef.current.syncSea) apiRef.current.syncSea();
-  }, [mediaMode, view, seaVideo]);
+  }, [mediaMode, view]);
 
   const petals = (list, front) =>
     list.map(([l, t, w, d, dl], i) => (
@@ -1139,12 +1134,9 @@ export default function SeaRingPortfolio({
     <span key={i} className="mote" style={{ left: `${l}%`, top: `${t}%`, "--w": `${w}px`, "--dur": `${d}s`, "--dl": `${dl}s` }} />
   ));
 
-  const scene = (v) => (
+  const scene = () => (
     <div className="scene" data-k="depth" data-depth="10">
-      <img src={mediaMode === "placeholder" || !seaImage ? SEA_PH : seaImage} alt="" onError={(e) => { if (e.currentTarget.src !== SEA_PH) e.currentTarget.src = SEA_PH; }} />
-      {mediaMode === "video" && seaVideo ? (
-        <video data-k="seaV" data-view={v} data-src={seaVideo} muted loop playsInline preload="none" onPlaying={(e) => e.currentTarget.classList.add("on")} />
-      ) : null}
+      <div className="glow" />
       <div className="grain" />
     </div>
   );
@@ -1154,7 +1146,7 @@ export default function SeaRingPortfolio({
       ref={rootRef}
       className="nrs"
       data-nav={showNav ? "1" : "0"}
-      style={{ ...style, "--cr": `${clamp(num(cornerRadius, 16), 0, 60)}px`, "--paper": paper, "--ink": ink, "--accent": accent }}
+      style={{ ...style, "--cr": `${clamp(num(cornerRadius, 16), 0, 60)}px`, "--paper": paper, "--ink": ink, "--accent": accent, "--glow": glowColor, "--htxt": headlineColor }}
     >
       <style>{CSS}</style>
 
@@ -1201,7 +1193,12 @@ export default function SeaRingPortfolio({
       <section className={"view home" + (view === "home" ? " on" : "")}>
         <div className="stage">
           <div className="frame" data-k="frame">
-            {scene("home")}
+            {scene()}
+            <div className="bt" aria-hidden="true">
+              {(Array.isArray(headline) ? headline : DEFAULT_HEADLINE).slice(0, 2).map((t, i) => (
+                <span key={i}>{t}</span>
+              ))}
+            </div>
             <div className="fx" data-k="depth" data-depth="22">{petals(PETALS_BACK, false)}</div>
             <div className="wall" data-k="wall">
               <div className="lens" data-k="lens">
