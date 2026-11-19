@@ -210,17 +210,21 @@ const CSS = `
 .nrs .rib{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;mix-blend-mode:screen}
 .nrs .glow{position:absolute;left:50%;top:50%;width:min(80cqw,94cqh);aspect-ratio:1/1;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle closest-side,color-mix(in srgb,var(--glow) 45%,white),transparent 100%) center/38% 38% no-repeat,radial-gradient(circle closest-side,var(--glow) 0%,color-mix(in srgb,var(--glow) 78%,black) 30%,color-mix(in srgb,var(--glow) 38%,black) 55%,color-mix(in srgb,var(--glow) 20%,black) 78%,var(--paper) 98%)}
 /* big bold headline, centred horizontally and vertically as one tight block and lit by the glow behind it */
-.nrs .bt{position:absolute;inset:0;z-index:1;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:4% 0;opacity:0;transition:opacity .9s}
-.nrs.revealed .bt,.nrs.noIntro .bt{opacity:1}
-.nrs .bt span{display:block;text-align:center;font-family:"Antonio","Big Shoulders Display","Barlow Condensed",Impact,sans-serif;font-weight:700;text-transform:uppercase;line-height:.86;letter-spacing:.01em;white-space:nowrap;font-size:min(calc(var(--bw) * 11.8),calc(var(--bh) * 23));background-image:linear-gradient(90deg,color-mix(in srgb,var(--htxt) 30%,black) 0%,color-mix(in srgb,var(--htxt) 60%,black) 20%,color-mix(in srgb,var(--htxt) 85%,black) 40%,var(--htxt) 50%,color-mix(in srgb,var(--htxt) 85%,black) 60%,color-mix(in srgb,var(--htxt) 60%,black) 80%,color-mix(in srgb,var(--htxt) 30%,black) 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
-/* phones: the circle spans the full width of the screen (height follows, so it stays round) and the headline is larger */
-.nrs.sm .glow{width:100cqw}
+.nrs .bt{position:absolute;inset:0;z-index:1;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:4% 0}
+.nrs .bt .bl{display:block;text-align:center;font-family:"Antonio","Big Shoulders Display","Barlow Condensed",Impact,sans-serif;font-weight:700;text-transform:uppercase;line-height:.86;letter-spacing:.01em;white-space:nowrap;font-size:min(calc(var(--bw) * 11.8),calc(var(--bh) * 23))}
+/* each letter takes its colour from the glow's lighting (bright in the middle of the line, darker toward the ends) and drops in on load, staggered, like the Video Ribbon headline */
+.nrs .bt .gch{display:inline-block;opacity:0;color:color-mix(in srgb,var(--htxt) calc(30% + 70% * var(--f)),black)}
+.nrs.revealed .bt .gch,.nrs.noIntro .bt .gch{opacity:1;animation:nrsDrop 1s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(260ms + var(--i) * 90ms + var(--l) * 180ms)}
+@keyframes nrsDrop{from{transform:translateY(-130%);opacity:0}to{transform:none;opacity:1}}
+/* phones: the lines are turned upright, so the letters drop in from the top of the screen along the line */
+@keyframes nrsDropV{from{transform:translateX(130%);opacity:0}to{transform:none;opacity:1}}
+.nrs.sm.revealed .bt .gch,.nrs.sm.noIntro .bt .gch{animation-name:nrsDropV}
 /* wide screens: the upper line sits a little closer to the ring row */
-.nrs:not(.sm) .bt span:first-child{transform:translateY(calc(var(--bh) * 6))}
+.nrs:not(.sm) .bt .bl:first-child{transform:translateY(calc(var(--bh) * 6))}
 .nrs.sm .bt{display:block;padding:0}
-.nrs.sm .bt span{position:absolute;top:47%;font-size:calc(var(--bw) * 14.5);transform:translate(-50%,-50%) rotate(-90deg)}
-.nrs.sm .bt span:first-child{left:15%}
-.nrs.sm .bt span:last-child{left:86%}
+.nrs.sm .bt .bl{position:absolute;top:47%;font-size:calc(var(--bw) * 14.5);transform:translate(-50%,-50%) rotate(-90deg)}
+.nrs.sm .bt .bl:first-child{left:15%}
+.nrs.sm .bt .bl:last-child{left:86%}
 .nrs .petal,.nrs .mote,.nrs .mist{display:none}
 .nrs .grain{position:absolute;inset:-4%;background-image:${GRAIN};opacity:.07;mix-blend-mode:screen;pointer-events:none;animation:nrsJit .9s steps(5) infinite}
 @keyframes nrsJit{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}60%{transform:translate(-1%,-2%)}80%{transform:translate(3%,1%)}100%{transform:translate(0,0)}}
@@ -1623,7 +1627,13 @@ export default function SeaRingPortfolio({
             {scene()}
             <div className="bt" aria-hidden="true">
               {(Array.isArray(headline) ? headline : DEFAULT_HEADLINE).slice(0, 2).map((t, i) => (
-                <span key={i}>{t}</span>
+                <span key={i} className="bl" style={{ "--l": i }}>
+                  {Array.from(String(t).trim().toUpperCase()).map((ch, k, arr) => (
+                    <span key={k} className="gch" style={{ "--i": k, "--f": (1 - Math.abs((2 * (k + 0.5)) / arr.length - 1)).toFixed(3) }}>
+                      {ch === " " ? " " : ch}
+                    </span>
+                  ))}
+                </span>
               ))}
             </div>
             <div className="fx" data-k="depth" data-depth="22">{petals(PETALS_BACK, false)}</div>

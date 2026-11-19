@@ -28,6 +28,7 @@ import strideBarSite from "../library/stride-bar-site/meta.jsx";
 import videoRibbon from "../library/video-ribbon/meta.jsx";
 import seaRingPortfolio from "../library/sea-ring-portfolio/meta.jsx";
 import ribbonGlow from "../library/ribbon-glow/meta.jsx";
+import garmentRail from "../library/garment-rail/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -57,6 +58,7 @@ export const components = [
   videoRibbon,
   seaRingPortfolio,
   ribbonGlow,
+  garmentRail,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
