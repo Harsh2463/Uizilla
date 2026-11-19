@@ -207,14 +207,20 @@ const CSS = `
 .nrs.intro:not(.revealed) .home .scene{opacity:0}
 /* violet radial glow over the full height, fading to black at the sides */
 /* a perfectly round glow: its diameter is the smaller of 60% of the width and the full height, so it stays a complete circle at any size (the diameter is the smaller of 80% of the width and 94% of the height of the panel, so it follows the panel height and never gets cut off) */
+.nrs .rib{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;mix-blend-mode:screen}
 .nrs .glow{position:absolute;left:50%;top:50%;width:min(80cqw,94cqh);aspect-ratio:1/1;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle closest-side,color-mix(in srgb,var(--glow) 45%,white),transparent 100%) center/38% 38% no-repeat,radial-gradient(circle closest-side,var(--glow) 0%,color-mix(in srgb,var(--glow) 78%,black) 30%,color-mix(in srgb,var(--glow) 38%,black) 55%,color-mix(in srgb,var(--glow) 20%,black) 78%,var(--paper) 98%)}
 /* big bold headline, centred horizontally and vertically as one tight block and lit by the glow behind it */
-.nrs .bt{position:absolute;inset:0;z-index:1;pointer-events:none;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:calc(var(--bh) * 7);opacity:0;transition:opacity .9s}
+.nrs .bt{position:absolute;inset:0;z-index:1;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:4% 0;opacity:0;transition:opacity .9s}
 .nrs.revealed .bt,.nrs.noIntro .bt{opacity:1}
-.nrs .bt span{display:block;text-align:center;font-family:"Antonio","Big Shoulders Display","Barlow Condensed",Impact,sans-serif;font-weight:700;text-transform:uppercase;line-height:.86;letter-spacing:.01em;white-space:nowrap;font-size:min(calc(var(--bw) * 11.8),calc(var(--bh) * 28));background-image:linear-gradient(90deg,color-mix(in srgb,var(--htxt) 30%,black) 0%,color-mix(in srgb,var(--htxt) 60%,black) 20%,color-mix(in srgb,var(--htxt) 85%,black) 40%,var(--htxt) 50%,color-mix(in srgb,var(--htxt) 85%,black) 60%,color-mix(in srgb,var(--htxt) 60%,black) 80%,color-mix(in srgb,var(--htxt) 30%,black) 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.nrs .bt span{display:block;text-align:center;font-family:"Antonio","Big Shoulders Display","Barlow Condensed",Impact,sans-serif;font-weight:700;text-transform:uppercase;line-height:.86;letter-spacing:.01em;white-space:nowrap;font-size:min(calc(var(--bw) * 11.8),calc(var(--bh) * 23));background-image:linear-gradient(90deg,color-mix(in srgb,var(--htxt) 30%,black) 0%,color-mix(in srgb,var(--htxt) 60%,black) 20%,color-mix(in srgb,var(--htxt) 85%,black) 40%,var(--htxt) 50%,color-mix(in srgb,var(--htxt) 85%,black) 60%,color-mix(in srgb,var(--htxt) 60%,black) 80%,color-mix(in srgb,var(--htxt) 30%,black) 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
 /* phones: the circle spans the full width of the screen (height follows, so it stays round) and the headline is larger */
 .nrs.sm .glow{width:100cqw}
-.nrs.sm .bt span{font-size:calc(var(--bw) * 14.5)}
+/* wide screens: the upper line sits a little closer to the ring row */
+.nrs:not(.sm) .bt span:first-child{transform:translateY(calc(var(--bh) * 6))}
+.nrs.sm .bt{display:block;padding:0}
+.nrs.sm .bt span{position:absolute;top:47%;font-size:calc(var(--bw) * 14.5);transform:translate(-50%,-50%) rotate(-90deg)}
+.nrs.sm .bt span:first-child{left:15%}
+.nrs.sm .bt span:last-child{left:86%}
 .nrs .petal,.nrs .mote,.nrs .mist{display:none}
 .nrs .grain{position:absolute;inset:-4%;background-image:${GRAIN};opacity:.07;mix-blend-mode:screen;pointer-events:none;animation:nrsJit .9s steps(5) infinite}
 @keyframes nrsJit{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}60%{transform:translate(-1%,-2%)}80%{transform:translate(3%,1%)}100%{transform:translate(0,0)}}
@@ -301,6 +307,418 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.nrs *{animation:none!important;transition:none!important}.nrs .loader{display:none}}
 `;
 
+
+// ── ribbon beams: the Ribbon Glow shader drawn behind the ring, in the theme colours ──
+const RibbonBeam = (() => {
+  const MAX_DPR = 1.5;
+
+  // Field shape, fixed: 84 folded layers, how far the pointer twists / drags the plane.
+  const LAYERS = 84;
+  const TWIST = 1.25;
+  const DRAG = 0.18;
+
+  const VERT_SRC = `#version 300 es
+  const vec2 P[3] = vec2[3](vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
+  void main() { gl_Position = vec4(P[gl_VertexID], 0.0, 1.0); }
+  `;
+
+  const FIELD_SRC = `#version 300 es
+  precision highp float;
+  uniform vec2 uRes;
+  uniform float uTime;
+  uniform vec3 uC1;
+  uniform vec3 uC2;
+  uniform float uSize;
+  uniform float uAngle;
+  uniform vec2 uMouse;
+  uniform float uOn;
+  uniform float uReach;
+  uniform vec2 uVel;
+  out vec4 o;
+
+  const float LAYERS = ${LAYERS.toFixed(1)};
+  const float TWIST = ${TWIST.toFixed(3)};
+  const float DRAG = ${DRAG.toFixed(3)};
+  const float GAIN = 0.62;
+  const vec2 CENTRE = vec2(-0.62, 0.24);
+  const float TILT = 0.6;
+  const float ZOOM = 1.05;
+  const float THETA = 2.13;
+  const float SHEAR = 0.963;
+  const float SHRINK = 0.953;
+  const vec2 WARP_FREQ = vec2(0.42, 2.4);
+  const vec2 WARP_AMP = vec2(0.13, 0.027);
+  const vec2 ASPECT = vec2(2.1, 0.17);
+  const float OFFSET = 0.36;
+  const float GLOW = 0.0021;
+  const float SOFT = 0.0019;
+  const float FALLOFF = 0.37;
+  const float PHASE = 12.0;
+  const float CYCLE = 0.16;
+  const float HUE_TRAVEL = 2.0;
+
+  mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+
+  void main() {
+    vec2 R = uRes;
+    vec2 pos = (gl_FragCoord.xy - 0.5 * R) / R.y;
+
+    // The plane swirls around the pointer and is dragged by its motion. Skipped
+    // outright at zero weight so a hover of 0 leaves the frame untouched.
+    vec2 d = pos - uMouse;
+    float w = uOn * exp(-dot(d, d) / (uReach * uReach));
+    if (w > 1e-4) pos = uMouse + rot(w * TWIST) * d * (1.0 - 0.3 * min(w, 1.0)) - uVel * min(w, 1.0) * DRAG;
+
+    pos = rot(uAngle) * pos / uSize;
+    float t = uTime * 0.49 + PHASE;
+    float breath = (-sin(uTime * 0.735) + sin(uTime * 0.49 + 1.0)) * 0.25 + 0.5;
+    vec2 u = rot(TILT) * ((pos - CENTRE) * (ZOOM - breath * 0.085));
+    mat2 fold = mat2(cos(THETA), sin(THETA), -SHEAR, cos(THETA));
+
+    vec3 col = vec3(0.0);
+    for (float i = 1.0; i <= LAYERS; i += 1.0) {
+      u.x -= sin(u.y * WARP_FREQ.x + t + i * 0.007) * WARP_AMP.x;
+      u.y -= sin(u.x * WARP_FREQ.y - t + i * 0.02) * WARP_AMP.y;
+      u = fold * u * SHRINK;
+      vec2 q = (u - vec2(OFFSET + breath * 0.1, 0.0)) * ASPECT;
+      float g = GLOW / (dot(q, q) + SOFT) * (0.25 + breath * 0.4);
+      float r = length(u);
+      float k = sin(i * CYCLE + t * 1.2 + r * HUE_TRAVEL) * 0.5 + 0.5;
+      col += g * mix(uC1, uC2, k) * (0.62 + 0.5 * k) * exp2(-r * FALLOFF);
+    }
+    vec3 x = max(col * GAIN, 0.0);
+    col = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+    col = pow(clamp(col, 0.0, 1.0), vec3(0.85, 0.92, 0.98));
+    col *= 1.0 - smoothstep(0.5, 1.6, length(pos)) * 0.07;
+    o = vec4(col, 1.0);
+  }
+  `;
+
+  const FINISH_SRC = `#version 300 es
+  precision highp float;
+  uniform sampler2D uField;
+  uniform vec2 uRes;
+  uniform float uTime;
+  uniform vec3 uBg;
+  uniform float uPaper;
+  out vec4 o;
+
+  float ign(vec2 p, float f) { p += 5.588238 * mod(f, 64.0); return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y)); }
+
+  void main() {
+    vec2 frag = gl_FragCoord.xy;
+    vec3 L = max(texture(uField, frag / uRes).rgb, 0.0);
+    // Dark ground: the ribbons are light, screened over it. Light ground: the
+    // same hues laid on as pigment, the paper showing where the light is dim.
+    vec3 dark = uBg + L * (1.0 - uBg);
+    float strength = clamp(max(L.r, max(L.g, L.b)), 0.0, 1.0);
+    vec3 paper = uBg * (1.0 - strength) + L * 0.96;
+    vec3 col = mix(dark, paper, uPaper);
+    col += (ign(frag, floor(uTime * 24.0)) - 0.5) / 255.0;
+    o = vec4(clamp(col, 0.0, 1.0), 1.0);
+  }
+  `;
+
+  const colorCache = new Map();
+
+  // Accepts #rgb / #rrggbb, rgb()/rgba() and hsl()/hsla(); returns [r, g, b] in 0..1 or null.
+  function parseColor(input) {
+    if (!input) return null;
+    const key = String(input);
+    if (colorCache.has(key)) return colorCache.get(key);
+    const s = key.trim();
+    let out = null;
+    if (s.charAt(0) === "#") {
+      let h = s.slice(1);
+      if (h.length === 3 || h.length === 4) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      if (h.length >= 6) {
+        const r = parseInt(h.slice(0, 2), 16);
+        const g = parseInt(h.slice(2, 4), 16);
+        const b = parseInt(h.slice(4, 6), 16);
+        if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) out = [r / 255, g / 255, b / 255];
+      }
+    } else {
+      const m = s.match(/^(rgba?|hsla?)\(([^)]*)\)/i);
+      if (m) {
+        const parts = m[2].split(/[\s,/]+/).filter(Boolean);
+        const f = (i) => parseFloat(parts[i]);
+        if (parts.length >= 3 && [0, 1, 2].every((i) => Number.isFinite(f(i)))) {
+          if (m[1].toLowerCase().startsWith("rgb")) {
+            const ch = (i) => (parts[i].endsWith("%") ? f(i) / 100 : f(i) / 255);
+            out = [ch(0), ch(1), ch(2)];
+          } else {
+            const hh = (((f(0) % 360) + 360) % 360) / 360;
+            const ss = f(1) / 100;
+            const ll = f(2) / 100;
+            const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss;
+            const p = 2 * ll - q;
+            const hue = (t) => {
+              t = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+              if (t < 1 / 6) return p + (q - p) * 6 * t;
+              if (t < 1 / 2) return q;
+              if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+              return p;
+            };
+            out = [hue(hh + 1 / 3), hue(hh), hue(hh - 1 / 3)];
+          }
+          out = out.map((c) => Math.min(1, Math.max(0, c)));
+        }
+      }
+    }
+    colorCache.set(key, out);
+    return out;
+  }
+
+  const color = (input, fallback) => (Array.isArray(input) ? input : parseColor(input) || parseColor(fallback));
+  const num = (v, fb) => (typeof v === "number" && isFinite(v) ? v : fb);
+  const clampN = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+  function link(gl, frag, label) {
+    const shader = (type, src) => {
+      const sh = gl.createShader(type);
+      if (!sh) return null;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.error(`RibbonGlow ${label} shader:`, gl.getShaderInfoLog(sh));
+        gl.deleteShader(sh);
+        return null;
+      }
+      return sh;
+    };
+    const vs = shader(gl.VERTEX_SHADER, VERT_SRC);
+    const fs = shader(gl.FRAGMENT_SHADER, frag);
+    if (!vs || !fs) return null;
+    const prog = gl.createProgram();
+    if (!prog) return null;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error(`RibbonGlow ${label} link:`, gl.getProgramInfoLog(prog));
+      gl.deleteProgram(prog);
+      return null;
+    }
+    return prog;
+  }
+
+  function locations(gl, prog, names) {
+    const out = {};
+    for (const n of names) out[n] = gl.getUniformLocation(prog, n);
+    return out;
+  }
+
+  // The half-resolution field target: half float where the GPU can render to it, 8-bit otherwise.
+  function fieldTarget(gl) {
+    const fbo = gl.createFramebuffer();
+    let tex = null;
+    let w = 0;
+    let h = 0;
+    let half = !!gl.getExtension("EXT_color_buffer_float");
+    return {
+      fbo,
+      texture: () => tex,
+      width: () => w,
+      height: () => h,
+      resize(nw, nh) {
+        if (nw === w && nh === h && tex) return;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (tex) gl.deleteTexture(tex);
+          tex = gl.createTexture();
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          gl.texImage2D(gl.TEXTURE_2D, 0, half ? gl.RGBA16F : gl.RGBA8, nw, nh, 0, gl.RGBA, half ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+          const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          if (ok || !half) break;
+          half = false;
+        }
+        w = nw;
+        h = nh;
+      },
+      dispose() {
+        if (tex) gl.deleteTexture(tex);
+        gl.deleteFramebuffer(fbo);
+      },
+    };
+  }
+
+  // Pointer in CSS px relative to the root, and whether it is over it.
+  function trackPointer(root) {
+    const p = { tx: 0, ty: 0, inside: false };
+    const read = (e) => {
+      const r = root.getBoundingClientRect();
+      p.tx = e.clientX - r.left;
+      p.ty = e.clientY - r.top;
+      p.inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    };
+    const out = (e) => {
+      if (!e.relatedTarget) p.inside = false;
+    };
+    window.addEventListener("pointermove", read, { passive: true });
+    window.addEventListener("pointerdown", read, { passive: true });
+    document.addEventListener("pointerout", out);
+    return {
+      p,
+      dispose() {
+        window.removeEventListener("pointermove", read);
+        window.removeEventListener("pointerdown", read);
+        document.removeEventListener("pointerout", out);
+      },
+    };
+  }
+
+
+  return function RibbonBeam({ c1, c2, speed, opacity, hover, reach }) {
+    const canvasRef = useRef(null);
+    const vRef = useRef({});
+    const still = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // both ribbon colours stay on the glow colour's side: the second is only 22% of the way toward the headline colour
+    const a1 = parseColor(c1) || [0.47, 0.18, 1];
+    const a2 = parseColor(c2) || a1;
+    const lean = a1.map((v, i) => v + (a2[i] - v) * 0.22);
+    vRef.current = {
+      c1: a1,
+      c2: lean,
+      speed: still ? 0 : clampN(num(speed, 50), 0, 100) / 50,
+      size: 1,
+      angle: (-180 * Math.PI) / 180,
+      hover: clampN(num(hover, 100), 0, 200) / 100,
+      reach: clampN(num(reach, 240), 10, 800),
+    };
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      const root = canvas ? canvas.parentElement : null;
+      if (!canvas || !root) return;
+      const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false });
+      if (!gl) return;
+      const field = link(gl, FIELD_SRC, "field");
+      const finish = link(gl, FINISH_SRC, "finish");
+      if (!field || !finish) return;
+      const uf = locations(gl, field, ["uRes", "uTime", "uC1", "uC2", "uSize", "uAngle", "uMouse", "uOn", "uReach", "uVel"]);
+      const un = locations(gl, finish, ["uField", "uRes", "uTime", "uBg", "uPaper"]);
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      const target = fieldTarget(gl);
+      const pointer = trackPointer(root);
+      const ptr = pointer.p;
+
+      // Eased pointer state, in CSS px (y down) and CSS px per second.
+      let mx = 0;
+      let my = 0;
+      let vx = 0;
+      let vy = 0;
+      let on = 0;
+      let raf = 0;
+      let last = -1;
+      let clock = 0;
+      let visible = true;
+      const host = root.closest(".nrs");
+
+      // Skip the work while the component is off screen.
+      const io = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver((es) => { visible = es[0].isIntersecting; }) : null;
+      if (io) io.observe(root);
+
+      const render = (now) => {
+        raf = requestAnimationFrame(render);
+        // wait until the loader has opened the section, and skip the work while off screen
+        if (!visible || document.visibilityState === "hidden" || (host && !host.classList.contains("revealed"))) {
+          last = -1;
+          return;
+        }
+        const dt = last < 0 ? 0 : clampN((now - last) / 1000, 0, 0.05);
+        last = now;
+        const v = vRef.current;
+        clock = (clock + dt * v.speed) % 3600;
+
+        const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+        const cw = canvas.clientWidth || 1200;
+        const ch = canvas.clientHeight || 800;
+        const bw = Math.max(1, Math.round(cw * dpr));
+        const bh = Math.max(1, Math.round(ch * dpr));
+        if (canvas.width !== bw || canvas.height !== bh) {
+          canvas.width = bw;
+          canvas.height = bh;
+        }
+        target.resize(Math.max(1, Math.round(bw / 2)), Math.max(1, Math.round(bh / 2)));
+
+        // Presence fades in and out; position is lightly smoothed; velocity is its smoothed derivative.
+        const present = ptr.inside ? 1 : 0;
+        if (present && on < 0.02) {
+          mx = ptr.tx;
+          my = ptr.ty;
+        }
+        on += (present - on) * (1 - Math.exp(-dt * 5));
+        const k = 1 - Math.exp(-dt * 16);
+        const nx = mx + (ptr.tx - mx) * k;
+        const ny = my + (ptr.ty - my) * k;
+        if (dt > 0) {
+          const kv = 1 - Math.exp(-dt * 8);
+          vx += ((nx - mx) / dt - vx) * kv;
+          vy += ((ny - my) / dt - vy) * kv;
+        }
+        mx = nx;
+        my = ny;
+        const vLen = Math.hypot(vx, vy) / ch;
+        const vCap = vLen > 3 ? 3 / vLen : 1;
+
+        const c1 = color(v.c1, "#772DFF");
+        const c2 = color(v.c2, "#C19AFF");
+        const bg = [0, 0, 0]; // drawn as light only: the canvas is screen-blended over the glow
+
+        // Pass 1: the field, at half resolution.
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+        gl.viewport(0, 0, target.width(), target.height());
+        gl.useProgram(field);
+        gl.uniform2f(uf.uRes, target.width(), target.height());
+        gl.uniform1f(uf.uTime, clock);
+        gl.uniform3f(uf.uC1, c1[0], c1[1], c1[2]);
+        gl.uniform3f(uf.uC2, c2[0], c2[1], c2[2]);
+        gl.uniform1f(uf.uSize, v.size);
+        gl.uniform1f(uf.uAngle, v.angle);
+        gl.uniform2f(uf.uMouse, (mx - cw / 2) / ch, (ch / 2 - my) / ch);
+        gl.uniform1f(uf.uOn, on * v.hover);
+        gl.uniform1f(uf.uReach, v.reach / ch);
+        gl.uniform2f(uf.uVel, (vx / ch) * vCap, (-vy / ch) * vCap);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        // Pass 2: upsample and composite over the background.
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, bw, bh);
+        gl.useProgram(finish);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, target.texture());
+        gl.uniform1i(un.uField, 0);
+        gl.uniform2f(un.uRes, bw, bh);
+        gl.uniform1f(un.uTime, clock);
+        gl.uniform3f(un.uBg, bg[0], bg[1], bg[2]);
+        gl.uniform1f(un.uPaper, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+
+      raf = requestAnimationFrame(render);
+      return () => {
+        cancelAnimationFrame(raf);
+        if (io) io.disconnect();
+        pointer.dispose();
+        target.dispose();
+        gl.deleteVertexArray(vao);
+        gl.deleteProgram(field);
+        gl.deleteProgram(finish);
+      };
+    }, []);
+
+    return <canvas ref={canvasRef} className="rib" aria-hidden="true" style={{ opacity: clampN(num(opacity, 60), 0, 100) / 100 }} />;
+  };
+})();
+
 export default function SeaRingPortfolio({
   name = "studio",
   cards = DEFAULT_CARDS,
@@ -326,6 +744,9 @@ export default function SeaRingPortfolio({
   ink = "#EEF4F6",
   accent = "#772DFF",
   glowColor = "#772DFF",
+  ribbons = true,
+  ribbonSpeed = 50,
+  ribbonOpacity = 60,
   headlineColor = "#C19AFF",
   interactive = true,
   style = {},
@@ -980,18 +1401,23 @@ export default function SeaRingPortfolio({
       // Depth only changes the perspective strength (a nearer camera = a deeper, more dramatic ring); the ring
       // size and its push toward you stay as set. It is scaled by the screen length along the travel axis (wf).
       const dep = clamp(num(vert ? PP.mobileDepth : PP.depth, 1), 0.3, 3) * wf;
-      const endR = (vert ? 560 : 1800) * spacing;
-      const endP = (vert ? 420 : 760) / dep;
+      // The ring grows with the cards: its radius, camera distance and push scale with the card size along the
+      // direction of travel (the card's width on desktop, its height on phones), so the gaps between cards stay in
+      // proportion at any card size.
+      const cardH = clamp(num(PP.cardHeight, 160), 60, 420);
+      const sizeK = vert ? cardH / 160 : (cardH * CARD_RATIO * clamp(num(PP.cardWidthScale, 1), 0.4, 2)) / (160 * CARD_RATIO);
+      const endR = (vert ? 560 : 1800) * spacing * sizeK;
+      const endP = ((vert ? 420 : 760) / dep) * sizeK;
       const endTilt = 0;
       const endScale = vert ? 1.05 : 2.3;
-      const push = vert ? 240 * e : 0;
+      const push = vert ? 240 * sizeK * e : 0;
       // the forming ring is leaned over: about X on desktop, about Y for the vertical wheel
       const tilt = vert ? 0 : -22 * (1 - e);
       const tiltV = vert ? 22 * (1 - e) + endTilt * e : 0;
       const tr = (vert ? tiltV : tilt) * DEG;
-      const radius = 460 + (endR - 460) * e;
-      const anchor = vert ? 0 : -radius * Math.sin(tr) + 460 * Math.sin(-22 * DEG) * (1 - e);
-      const persp = 1000 + (endP - 1000) * e;
+      const radius = 460 * sizeK + (endR - 460 * sizeK) * e;
+      const anchor = vert ? 0 : -radius * Math.sin(tr) + 460 * sizeK * Math.sin(-22 * DEG) * (1 - e);
+      const persp = 1000 * sizeK + (endP - 1000 * sizeK) * e;
       const roll = vert ? 16 * (1 - e) : -20 * (1 - e);
       const s0 = vert ? 0.78 : 0.52; // phones: a bit larger cards in the loading ring
       const cardScale = s0 + (endScale - s0) * e * e;
@@ -1137,6 +1563,7 @@ export default function SeaRingPortfolio({
   const scene = () => (
     <div className="scene" data-k="depth" data-depth="10">
       <div className="glow" />
+      {ribbons ? <RibbonBeam c1={glowColor} c2={headlineColor} speed={ribbonSpeed} opacity={ribbonOpacity} hover={35} reach={170} /> : null}
       <div className="grain" />
     </div>
   );

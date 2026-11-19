@@ -27,6 +27,7 @@ import scrollHighlight from "../library/scroll-highlight/meta.jsx";
 import strideBarSite from "../library/stride-bar-site/meta.jsx";
 import videoRibbon from "../library/video-ribbon/meta.jsx";
 import seaRingPortfolio from "../library/sea-ring-portfolio/meta.jsx";
+import ribbonGlow from "../library/ribbon-glow/meta.jsx";
 
 export const components = [
   roundCarousel,
@@ -55,6 +56,7 @@ export const components = [
   strideBarSite,
   videoRibbon,
   seaRingPortfolio,
+  ribbonGlow,
 ];
 
 export const getComponent = (slug) => components.find((c) => c.slug === slug);
