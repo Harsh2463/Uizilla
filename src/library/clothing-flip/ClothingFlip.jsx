@@ -1,1704 +1,582 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 /**
- * ClothingFlip — a shop rail of garments hanging edge-on from a bar, drifting
- * left on a loop. Point at one and it turns to face you while its neighbours
- * part to make room; click it and it lifts to the middle of the frame, the rail
- * steps back into the dark, and a caption opens under it: counter, title,
- * price, a button, and arrows to browse the rest of the rail.
+ * ClothingFlip — "Offcut", a dark streetwear clothing-rail hero.
  *
- * It is Magazine Flip's engine (plain WebGL, one drawing per garment, the pointer
- * answered by drawing the rail again with each garment's number as its colour)
- * laid out as a rail instead of a rail. Only the garment's own pixels
- * count: transparent corners neither draw nor take a click.
+ * A gothic blackletter logo, a polished chrome rail across the page and twelve garments hanging on it in
+ * profile (side view). Point at one and it swings round to face you (front view) while its neighbours part to
+ * make room, with its name and price under it. Click a garment and it lifts off the rail into a large, centred
+ * detail view with a counter, an italic serif name, a price, previous / next arrows and a Close button, while the
+ * rest of the page washes out. A red marquee band runs along the bottom.
  *
- * Self-contained: copy this single file into any React (16.8+) project and
- * render <ClothingFlip />. No other packages, CSS or files needed (no three.js).
- * It fills 100% of its parent, so give the parent a height, e.g.
- *   <div style={{ height: 640 }}><ClothingFlip images={products} /></div>
+ * The garments come from two transparent sprite sheets (4 columns x 3 rows): a side-view sheet for the rail and a
+ * front-view sheet for the faced and detail views. Both are served as WebP.
  *
- * Each entry of `images` is a product:
- *   { src, title?, price?, buyUrl?, buyLabel? }
- * `src` is ONE picture of the garment on its hanger, ideally a cut-out on a
- * transparent background with the hook at the top. The edge-on view is that
- * same picture turned on its edge, so nothing has to be shot twice. A bare URL
- * string also works. `onBuy(item, index)` is called when the button is pressed
- * (and `buyUrl`, if set, opens in a new tab). `onOpen` and `onClose` fire as a
- * product opens and closes.
- *
- * Layout: one number (the wheel position) walks the rail, which wraps on its
- * own length so it runs forever. Sizes in px are solved against a fixed camera,
- * so a garment measured in px is the same fraction of the frame at any size.
+ * Self-contained: React only (Google Fonts for the type). The composition is one fixed 1500 x 1000 artboard that
+ * scales to fit its parent, so give the parent a height, e.g. <div style={{ height: 640 }}><ClothingFlip /></div>.
  */
 
-/* --------------------------------------------------------------- constants */
+// WebP via ImageKit's format transform; the sheets keep their transparency.
+const FRONT_SHEET = "https://ik.imagekit.io/Harsh2463/jackets/Hoodie%20Color%20Grid%20Collection.png?tr=f-webp,q-90";
+const SIDE_SHEET = "https://ik.imagekit.io/Harsh2463/jackets/Hoodie%20Sprite%20Sheet%20Collection%20side%20view.png?tr=f-webp,q-90";
+const FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@1&family=UnifrakturMaguntia&display=swap";
 
-/** Vertical field of view. Narrow, so a garment turned edge-on reads as a sliver rather than a wedge. */
-const CAM_FOV = 30;
-/** How far back the camera sits, in world units. */
-const CAM_Z = 6;
-/** World units of frame height visible at z = 0. */
-const VIEW_HEIGHT = 2 * CAM_Z * Math.tan((CAM_FOV * Math.PI) / 360);
-/** Segments across the garment, so edges stay smooth. */
-const PAGE_SEGMENTS = 40;
-/** Most garments that can exist in the deck. */
-const MAX_PAGES = 60;
-/** A garment's thickness as a fraction of its width. */
-const THICKNESS_RATIO = 0.005;
-/** Atlas cells are square powers of two and capped, so a long list stays in one texture. */
-const CELL_MAX = 1024;
-const ATLAS_MAX = 4096;
-
-const PLACEHOLDER_ASPECTS = [0.72, 1.5, 0.78, 1.33, 1.0, 1.62, 0.68, 1.2, 0.86, 1.45];
-const PLACEHOLDER_COUNT = 10;
-
-/** How dark the rail goes behind a garment that is being held up. */
-const CORRIDOR_DIM = 0.1;
-/** A pointer that travels further than this (px), or is held longer (ms), was not a tap. */
-const TAP_SLOP = 6;
-const TAP_MS = 600;
-/** The ID buffer is the whole frame, redrawn at up to this on its long side.
- * Hover and tap share it, so the card that lights up is the card that opens. */
-const PICK_MAX = 900;
-/** The garment under the pointer is re-checked at most this often, in ms. */
-const HOVER_MS = 70;
-
-
-/** Used for every sample product until you add your own pictures. */
-const SAMPLE_IMAGE =
-  "https://ik.imagekit.io/Harsh2463/jackets/Believe%20in%20Yourself%20Hoodie.png?updatedAt=1794681506967";
-
-// There is no built-in stand-in picture: an entry whose picture cannot be loaded
-// shows a numbered placeholder instead.
-const FALLBACK_IMAGES = [];
-
-/** Sample products, so the component is a working shop display out of the box.
- * Replace `src`, the text and `buyUrl` with your own. */
-export const DEFAULT_PRODUCTS = [
-  { src: SAMPLE_IMAGE, title: "Believe in Yourself Hoodie", price: "$98", buyUrl: "https://example.com/shop/believe-hoodie" },
-  { src: SAMPLE_IMAGE, title: "Everyday Pullover", price: "$84", buyUrl: "https://example.com/shop/everyday-pullover" },
-  { src: SAMPLE_IMAGE, title: "Midnight Zip Hoodie", price: "$112", buyUrl: "https://example.com/shop/midnight-zip" },
-  { src: SAMPLE_IMAGE, title: "Studio Oversized Hoodie", price: "$120", buyUrl: "https://example.com/shop/studio-oversized" },
-  { src: SAMPLE_IMAGE, title: "Heavyweight Crew", price: "$92", buyUrl: "https://example.com/shop/heavyweight-crew" },
-  { src: SAMPLE_IMAGE, title: "Core Black Hoodie", price: "$88", buyUrl: "https://example.com/shop/core-black" },
-  { src: SAMPLE_IMAGE, title: "Night Run Hoodie", price: "$104", buyUrl: "https://example.com/shop/night-run" },
-  { src: SAMPLE_IMAGE, title: "Classic Pocket Hoodie", price: "$90", buyUrl: "https://example.com/shop/classic-pocket" },
-  { src: SAMPLE_IMAGE, title: "Essential Hoodie", price: "$76", buyUrl: "https://example.com/shop/essential" },
-  { src: SAMPLE_IMAGE, title: "Signature Hoodie", price: "$130", buyUrl: "https://example.com/shop/signature" },
+// "Name | Price" (prices in rupees), in sheet order: left to right, top to bottom
+const DEFAULT_PRODUCTS = [
+  "Believe in Yourself Hoodie — Black | ₹2,499",
+  "Believe in Yourself Hoodie — Bone | ₹2,499",
+  "Believe in Yourself Hoodie — Heather Grey | ₹2,499",
+  "Believe in Yourself Hoodie — Navy | ₹2,499",
+  "Believe in Yourself Hoodie — Maroon | ₹2,599",
+  "Believe in Yourself Hoodie — Forest Green | ₹2,599",
+  "Believe in Yourself Hoodie — Royal Blue | ₹2,599",
+  "Believe in Yourself Hoodie — Purple | ₹2,599",
+  "Believe in Yourself Hoodie — Mustard | ₹2,699",
+  "Believe in Yourself Hoodie — Rust | ₹2,699",
+  "Believe in Yourself Hoodie — Pink | ₹2,699",
+  "Believe in Yourself Hoodie — Sky Blue | ₹2,699",
 ];
+const DEFAULT_MARQUEE = ["OFFCUT", "•", "LIMITED RUN", "•", "NO RESTOCKS", "•"];
 
-/* ----------------------------------------------------------------- helpers */
-
-function clamp(v, lo, hi, fallback) {
-  const n = typeof v === "number" && isFinite(v) ? v : fallback;
-  return Math.max(lo, Math.min(hi, n));
-}
-
-/** A link from your own data: only web and mail links are allowed through. */
-function safeUrl(url) {
-  if (typeof url !== "string") return "";
-  const u = url.trim();
-  if (!u) return "";
-  if (/^(https?:|mailto:|tel:|\/|#|\.)/i.test(u)) return u;
-  return /^[a-z][a-z0-9+.-]*:/i.test(u) ? "" : u;
-}
-
-/** One entry of `images`, in any of its accepted shapes. */
-function itemOf(entry) {
-  const base = entry && typeof entry === "object" ? entry : {};
-  const image = typeof entry === "string" ? entry : (base.image ?? base.src ?? "");
-  const src = typeof image === "string" ? image : (image?.src ?? "");
-  return {
-    src,
-    title: String(base.title ?? ""),
-    price: String(base.price ?? ""),
-    buyUrl: safeUrl(base.buyUrl),
-    buyLabel: typeof base.buyLabel === "string" ? base.buyLabel : "",
-  };
-}
-
-/** power2.inOut: what the tap blend is eased with. */
-function power2InOut(t) {
-  if (t <= 0) return 0;
-  if (t >= 1) return 1;
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-const nextPow2 = (n) => {
-  let p = 1;
-  while (p < n) p *= 2;
-  return p;
+/* ----- sprite sheet geometry (both sheets: 4 columns x 3 rows of hoodies hanging from a hook) ----- */
+const SHEETS = {
+  front: { w: 1449, h: 1085, hx: [207, 550, 897, 1245], hy: [14, 368, 722] },
+  side: { w: 1450, h: 1085, hx: [211, 553, 902, 1248], hy: [14, 368, 723] },
 };
-const prevPow2 = (n) => {
-  let p = 1;
-  while (p * 2 <= n) p *= 2;
-  return p;
+const BW = 340; // crop box, in sheet px: centred on the hook, 14px above it
+const BH = 361;
+const HOOK_UP = 14;
+const COLS = 4;
+const N = 12;
+
+/* ----- artboard layouts, in artboard px: a wide one (1500 x 1000) and a tall one for phones and portrait tablets ----- */
+const LAYOUTS = {
+  land: { W: 1500, H: 1000, SLOT: 96, OPEN: 86, CX: 750, GW: 283, GH: 300, BIGH: 470, RT: 254, AV: 790 },
+  port: { W: 720, H: 1340, SLOT: 50, OPEN: 90, CX: 360, GW: 301, GH: 320, BIGH: 560, RT: 360, AV: 800 },
 };
+const bigW = (L) => Math.round((L.BIGH * BW) / BH);
 
-/** Height reserved under a held-up garment for its caption, in px. */
-function captionReserve(h, enabled) {
-  return enabled ? Math.round(Math.min(210, h * 0.4)) : 0;
-}
-
-/**
- * Panel values are abstract scales; the shader wants world units. Every mapping
- * lands its default on a sensible number, so a default instance looks right and
- * the sliders open out from there.
- */
-function settingsFor(cfg, viewWidthPx, viewHeightPx) {
-  const worldPerPx = VIEW_HEIGHT / Math.max(1, viewHeightPx);
-  const viewAspect = Math.max(1, viewWidthPx) / Math.max(1, viewHeightPx);
-  const rawW = clamp(cfg.garmentWidth, 40, 1200, 300);
-  const rawH = clamp(cfg.garmentHeight, 40, 1600, 360);
-  // Garments shrink to fit small frames, so a phone shows the same composition.
-  const fit = Math.min(1, (viewHeightPx * 0.7) / rawH, (viewWidthPx * 0.85) / rawW);
-  const pageWidthPx = rawW * fit;
-  const pageHeightPx = rawH * fit;
-  const pageWidth = pageWidthPx * worldPerPx;
-  const pageHeight = pageHeightPx * worldPerPx;
-  const spacing = clamp(cfg.spacing, 0, 10, 5);
-  const smoothing = clamp(cfg.smoothing, 0, 10, 5);
-  const sway = clamp(cfg.sway, 0, 10, 5);
-  const drift = clamp(cfg.drift, -10, 10, 1.5);
-  const sideTurn = clamp(cfg.sideTurn, 0, 10, 8);
-
-  // How far each garment is turned from facing you, at rest. 10 is edge-on.
-  const restYaw = (Math.min(88, 15 + sideTurn * 7.5) * Math.PI) / 180;
-  // Hanger to hanger along the rail.
-  const pageSpacing = pageWidth * (0.12 + spacing * 0.065);
-  // When one turns to face you, its neighbours step aside by just enough.
-  const sliver = pageWidth * Math.abs(Math.cos(restYaw));
-  const part = Math.max(0, pageWidth * 0.515 + sliver * 0.5 + pageWidth * 0.05 - pageSpacing);
-  // `pages` is the least number of hangers; a wide frame gets more, so the rail
-  // is always longer than the frame and its seam is never on screen.
-  const pitchPx = pageSpacing / worldPerPx;
-  const need = Math.ceil((viewWidthPx + pageWidthPx * 2) / Math.max(1, pitchPx)) + 2;
-  const pages = Math.round(clamp(Math.max(clamp(cfg.pages, 4, MAX_PAGES, 10), need), 4, MAX_PAGES, 10));
-
-  // Where a held-up garment sits: in front of the rail, but never so close to
-  // the camera that it clips.
-  const focusZ = Math.min(CAM_Z * 0.55, pageWidth * 0.75);
-  // The frame, measured on that plane rather than at the origin.
-  const planeHeight = (VIEW_HEIGHT * (CAM_Z - focusZ)) / CAM_Z;
-  const planeWidth = planeHeight * viewAspect;
-  const fill = 0.7 + clamp(cfg.zoom, 0, 10, 5) * 0.04;
-
-  // The part of the frame the held-up garment is fitted into: everything above
-  // its caption, and clear of the arrows at either side.
-  const reserve = captionReserve(viewHeightPx, cfg.showDetails && cfg.tap);
-  const rx0 = 0.09;
-  const rx1 = 0.91;
-  const ry0 = 0;
-  const ry1 = Math.max(0.2, (viewHeightPx - reserve) / viewHeightPx);
-  const rw = rx1 - rx0;
-  const rh = ry1 - ry0;
-
-  return {
-    pageWidth,
-    pageHeight,
-    pageWidthPx,
-    pageHeightPx,
-    worldPerPx,
-    pages,
-    pageSpacing,
-    thickness: pageWidth * THICKNESS_RATIO,
-    restYaw,
-    part,
-    sway,
-    // Geometric, so the top of the slider reaches a genuinely heavy rail.
-    lerp: 0.35 * Math.pow(0.82, smoothing),
-    driftPerSecond: drift * pageWidth * 0.12,
-    wheel: 0.4 + clamp(cfg.scrollSens, 0, 10, 5) * 0.16,
-    tapToView: cfg.tap !== false,
-    focusZ,
-    focusX: ((rx0 + rx1) / 2 - 0.5) * planeWidth,
-    focusY: -((ry0 + ry1) / 2 - 0.5) * planeHeight,
-    // Whichever of the two axes runs out first.
-    focusScale: Math.min(
-      (planeHeight * rh * fill) / pageHeight,
-      (planeWidth * rw * fill) / pageWidth
-    ),
-    // Seconds out of the line, and the same back.
-    viewDuration: 1.6 - clamp(cfg.openSpeed, 0, 10, 5) * 0.13,
-  };
-}
-
-/* ------------------------------------------------------------------ shader */
-
-const PAGE_VERTEX = `
-attribute vec3 position;
-attribute vec2 uv;
-
-uniform mat4 uProj;
-uniform float uIndex;
-uniform float uPageThickness;
-uniform float uPageWidth;
-uniform float uPageHeight;
-uniform float uMeshCount;
-uniform float uPageSpacing;
-uniform float uScrollY;
-uniform float uSpeedY;
-uniform float uRestYaw;
-uniform float uPart;
-uniform float uSway;
-uniform float uTime;
-uniform float uFocusIndex;
-uniform float uFocusProgress;
-uniform float uFocusScale;
-uniform float uFocusZ;
-uniform vec2 uFocusXY;
-uniform float uHoverIndex;
-uniform float uHoverMix;
-
-varying vec2 vUv;
-varying float vDim;
-varying float vHover;
-varying float vOther;
-
-mat3 rotY(float a) {
-    return mat3(cos(a), 0.0, sin(a), 0.0, 1.0, 0.0, -sin(a), 0.0, cos(a));
-}
-
-mat3 rotZ(float a) {
-    return mat3(cos(a), sin(a), 0.0, -sin(a), cos(a), 0.0, 0.0, 0.0, 1.0);
-}
-
-void main() {
-    float aIndex = uIndex;
-
-    // The geometry is a unit box and the garment's size arrives as uniforms, so
-    // a width drag is a uniform write rather than a geometry rebuild.
-    vec3 basePos = vec3(
-        position.x * uPageWidth,
-        position.y * uPageHeight,
-        position.z * uPageThickness
-    );
-
-    // Where this hanger is along the bar. The rail is walked in x, and wrapped
-    // on its own length; the wrap is done on the garment's centre and applied as
-    // one offset to all of its vertices, so a garment never tears at the seam.
-    float fromMiddle = aIndex - (uMeshCount - 1.0) * 0.5;
-    float period = uMeshCount * uPageSpacing;
-    float xRail = mod(uPageSpacing * fromMiddle - uScrollY + period * 0.5, period) - period * 0.5;
-
-    // --- tap to view: 1 only on the garment being held up.
-    float focused = step(abs(aIndex - uFocusIndex), 0.5);
-    float e = focused * uFocusProgress;
-
-    // --- hover: the garment under the pointer turns to face you and swells a
-    // little; everything to its left steps left and everything to its right
-    // steps right, so it has room. None of this applies once one is held up.
-    float hovered = step(abs(aIndex - uHoverIndex), 0.5);
-    float hasHover = step(-0.5, uHoverIndex);
-    float hov = hovered * uHoverMix * (1.0 - uFocusProgress);
-    float fmH = uHoverIndex - (uMeshCount - 1.0) * 0.5;
-    float xH = mod(uPageSpacing * fmH - uScrollY + period * 0.5, period) - period * 0.5;
-    float side = sign(xRail - xH) * (1.0 - hovered) * hasHover;
-    float part = side * uPart * uHoverMix * (1.0 - uFocusProgress);
-
-    float k = mix(1.0, uFocusScale, e) * (1.0 + 0.05 * hov);
-
-    // Garments hang from the hook at the top of the picture: they turn about
-    // the vertical through it and swing about it, and they grow from it.
-    vec3 hook = vec3(0.0, uPageHeight * 0.5 * k, 0.0);
-    vec3 p = basePos * k - hook;
-
-    // The camera looks at a garment off to one side along a slanted ray, so the
-    // same yaw would show the ones on the right more of their face than the ones
-    // on the left. Adding the viewing angle makes every one equally edge-on, as
-    // if the rail were seen straight on.
-    float view = atan(xRail + part, ${CAM_Z.toFixed(1)});
-    float yaw = (uRestYaw + view) * (1.0 - hov) * (1.0 - e);
-    // A fast pass swings them a little behind the bar, and each also sways
-    // gently on its own. Held up or hovered, they hang still.
-    float swing = clamp(uSpeedY / uPageWidth * 0.6, -0.2, 0.2)
-        + sin(uTime * 1.25 + aIndex * 2.399) * 0.018;
-    float tilt = swing * uSway * 0.2 * (1.0 - e) * (1.0 - hov * 0.7);
-
-    p = rotY(yaw) * p;
-    p = rotZ(tilt) * p;
-    p += hook;
-
-    // Rigid at every point of the blend: it turns and travels, it never
-    // stretches. Its place on the rail fades out as it comes to the middle.
-    p.x += (xRail + part) * (1.0 - e);
-    p.z += uFocusZ * e;
-    p.xy += uFocusXY * e;
-
-    gl_Position = uProj * vec4(p - vec3(0.0, 0.0, ${CAM_Z.toFixed(1)}), 1.0);
-
-    vUv = uv;
-    // Everything but the garment being held up steps back into the dark.
-    vDim = uFocusProgress * (1.0 - focused);
-    vHover = hov;
-    vOther = uHoverMix * (1.0 - hovered) * hasHover * (1.0 - uFocusProgress);
-}
+const CSS = `
+.of{--bg:#0b0b0c;--ink:#f1efec;--mute:#8d8a86;--red:#b3121b;position:relative;width:100%;height:100%;min-height:360px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:"Inter","Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;box-sizing:border-box}
+.of *{box-sizing:border-box;margin:0;padding:0}
+.of button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.of .art{position:absolute;width:1500px;height:1000px;overflow:hidden;transform-origin:0 0;background:radial-gradient(ellipse 70% 55% at 50% 40%,#18181a,var(--bg))}
+.of .ui{font-size:12px;font-weight:500;letter-spacing:.12em;text-transform:uppercase}
+.of .pill{height:34px;padding:0 20px;border:1px solid rgba(241,239,236,.6);border-radius:40px;display:inline-grid;place-items:center;transition:background .25s,color .25s}
+.of .pill:hover{background:var(--ink);color:var(--bg)}
+.of .dim{transition:opacity .7s cubic-bezier(.2,.8,.2,1),filter .7s}
+.of.open .dim{opacity:.12;filter:blur(2px)}
+.of.open .dimmer{opacity:0;pointer-events:none}
+.of .about{position:absolute;left:46px;top:46px}
+.of .logo{position:absolute;left:50%;top:26px;transform:translateX(-50%);font-family:"UnifrakturMaguntia",serif;font-weight:400;font-size:64px;line-height:1;letter-spacing:.01em;white-space:nowrap}
+.of .contact{position:absolute;right:46px;top:46px}
+.of .rail{position:absolute;left:-80px;right:-80px;top:254px;height:12px;border-radius:6px;background:linear-gradient(#fafafa 0%,#b9bcc1 28%,#5d6066 55%,#a9adb3 78%,#e6e7e9 100%);box-shadow:0 10px 18px rgba(0,0,0,.45)}
+.of .rack{position:absolute;left:0;top:0;width:1500px;height:1000px;touch-action:pan-y}
+.of.drag .rack,.of.drag .g{cursor:grabbing}
+/* the tall composition (phones, portrait tablets): bigger type, a shorter rail, the garments and the detail view stacked vertically */
+.of.pt .ui{font-size:24px}
+.of.pt .pill{height:56px;padding:0 34px}
+.of.pt .about{left:36px;top:44px}
+.of.pt .contact,.of.pt .close{right:36px;top:44px}
+.of.pt .logo{top:20px;font-size:96px}
+.of.pt .rail{top:360px;height:14px}
+.of.pt .g{top:341px;width:301px;height:320px;margin-left:-150.5px}
+.of.pt .cap{top:675px;font-size:20px}
+.of.pt .cap b{margin-bottom:6px}
+.of.pt .avail{top:800px}
+.of.pt .band{height:76px}
+.of.pt .track{font-size:22px}
+.of.pt .track span{padding-right:36px}
+.of.pt .big,.of.pt .big2{top:400px;width:527px;height:560px;margin-left:-263.5px}
+.of.pt .arr{top:640px;width:70px;height:70px}
+.of.pt .arr svg{width:26px;height:26px}
+.of.pt .prev{left:18px}
+.of.pt .next{left:auto;right:18px}
+.of.pt .info{top:975px;width:660px;white-space:normal}
+.of.pt .num{font-size:20px}
+.of.pt .name{font-size:46px;margin:10px 0 8px}
+.of.pt .price{font-size:24px;margin-bottom:20px}
+.of .g{position:absolute;top:236px;width:283px;height:300px;margin-left:-141.5px;perspective:900px;cursor:pointer;transition:left .75s cubic-bezier(.2,.8,.2,1)}
+.of .g i{position:absolute;inset:0;background-repeat:no-repeat;transform-origin:50% 4%;transition:transform .75s cubic-bezier(.2,.8,.2,1),opacity .75s cubic-bezier(.2,.8,.2,1),filter .75s}
+.of .g i.s{filter:brightness(.82) drop-shadow(0 18px 18px rgba(0,0,0,.5))}
+.of .g i.f{transform:rotateY(-74deg);opacity:0;filter:brightness(.82) drop-shadow(0 18px 18px rgba(0,0,0,.5))}
+.of .g.face i.s{transform:rotateY(74deg);opacity:0}
+.of .g.face i.f{transform:rotateY(0deg);opacity:1;filter:brightness(1) drop-shadow(0 22px 26px rgba(0,0,0,.55))}
+.of .cap{position:absolute;top:552px;transform:translateX(-50%);text-align:center;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);white-space:nowrap;pointer-events:none;opacity:0;transition:left .75s cubic-bezier(.2,.8,.2,1),opacity .35s}
+.of .cap.on{opacity:1}
+.of.open .cap.on{opacity:0}
+.of .cap b{display:block;color:var(--ink);font-weight:500;margin-bottom:4px}
+.of .avail{position:absolute;left:50%;top:790px;transform:translateX(-50%)}
+.of .band{position:absolute;left:0;right:0;bottom:0;height:46px;background:var(--red);overflow:hidden;display:flex;align-items:center}
+.of .track{display:flex;white-space:nowrap;font-size:13px;font-weight:600;letter-spacing:.14em;animation:ofMq 22s linear infinite}
+.of .track span{padding-right:22px}
+@keyframes ofMq{to{transform:translateX(-50%)}}
+.of .det{position:absolute;inset:0;pointer-events:none}
+.of.open .det{pointer-events:auto}
+.of .hit{position:absolute;inset:0}
+.of .big,.of .big2{position:absolute;left:50%;top:257px;width:443px;height:470px;margin-left:-221.5px;background-repeat:no-repeat;opacity:0;pointer-events:none}
+.of .big{transform-origin:50% 4%;filter:drop-shadow(0 30px 40px rgba(0,0,0,.6))}
+.of .arr{position:absolute;top:452px;width:46px;height:46px;border-radius:50%;border:1px solid rgba(241,239,236,.5);display:grid;place-items:center;opacity:0;transition:opacity .4s ease .25s,background .2s,color .2s}
+.of .arr:hover{background:var(--ink);color:var(--bg)}
+.of .arr svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}
+.of .prev{left:calc(50% - 285.5px)}
+.of .next{left:calc(50% + 239.5px)}
+.of .info{position:absolute;left:50%;top:770px;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity .5s ease .25s;white-space:nowrap}
+.of .num{font-size:11px;letter-spacing:.16em;color:var(--mute)}
+.of .name{font-family:"Instrument Serif",serif;font-style:italic;font-weight:400;font-size:40px;line-height:1.15;margin:8px 0 6px}
+.of .price{font-size:13px;letter-spacing:.08em;color:var(--mute);margin-bottom:18px}
+.of .close{position:absolute;right:46px;top:46px;opacity:0;transition:opacity .4s ease .25s}
+.of.open .info,.of.open .arr,.of.open .close{opacity:1}
+.of.open .arr,.of.open .close,.of.open .info button{pointer-events:auto}
 `;
 
-const PAGE_FRAGMENT = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-
-uniform sampler2D uAtlas;
-uniform float uPageAspect;
-uniform float uIndex;
-uniform vec4 uRect;
-uniform float uAspect;
-uniform float uPick;
-
-varying vec2 vUv;
-varying float vDim;
-varying float vHover;
-varying float vOther;
-
-void main() {
-    // Contain, never crop: the whole garment on its own proportions, pinned to
-    // the top of the garment so every hook meets the bar whatever the picture's
-    // shape. Whatever is left over is empty and draws nothing.
-    vec2 uv = vUv;
-    float s = uAspect / uPageAspect;
-    if (s >= 1.0) {
-        uv.y = 1.0 - (1.0 - uv.y) * s;
-    } else {
-        uv.x = (uv.x - 0.5) / s + 0.5;
-    }
-    bool outside = uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0;
-
-    // The cell's rect is stored inset by a texel, so a garment's edge never
-    // picks up its neighbour in the atlas.
-    vec2 atlasUv = mix(uRect.xy, uRect.zw, clamp(uv, 0.0, 1.0));
-    vec4 color = texture2D(uAtlas, atlasUv);
-
-    // Only the garment itself is there: its transparent corners neither draw
-    // nor answer the pointer.
-    if (outside || color.a < 0.08) discard;
-
-    // The picking pass: the garment's index as a colour, offset by one so that
-    // nothing at all reads back as zero.
-    if (uPick > 0.5) {
-        gl_FragColor = vec4((uIndex + 1.0) / 255.0, 0.0, 0.0, 1.0);
-        return;
-    }
-
-    // The atlas is uploaded premultiplied, so colour is already weighted by alpha.
-    vec3 rgb = color.rgb * mix(1.0, ${CORRIDOR_DIM.toFixed(2)}, vDim);
-    // Hover: the garment under the pointer brightens; the others fall back a
-    // touch, so the one that will open is clear.
-    rgb *= 1.0 + 0.1 * vHover;
-    rgb *= 1.0 - 0.14 * vOther;
-    gl_FragColor = vec4(rgb, color.a);
-}
-`;
-
-/* ---------------------------------------------------------------- geometry */
-
-/** A unit box: front and back faces on a PAGE_SEGMENTS grid, plus thin edges. */
-function buildBox() {
-  const verts = [];
-  const idx = [];
-  const grid = (fn, gx, gy) => {
-    const base = verts.length / 5;
-    for (let iy = 0; iy <= gy; iy++) {
-      for (let ix = 0; ix <= gx; ix++) {
-        verts.push(...fn(ix / gx, 1 - iy / gy));
-      }
-    }
-    for (let iy = 0; iy < gy; iy++) {
-      for (let ix = 0; ix < gx; ix++) {
-        const a = base + iy * (gx + 1) + ix;
-        const b = a + 1;
-        const c = a + gx + 1;
-        const d = c + 1;
-        idx.push(a, c, b, c, d, b);
-      }
-    }
-  };
-  const S = PAGE_SEGMENTS;
-  grid((u, v) => [u - 0.5, v - 0.5, 0.5, u, v], S, S); // front
-  grid((u, v) => [0.5 - u, v - 0.5, -0.5, u, v], S, S); // back, u runs the other way
-  grid((u, v) => [-0.5, v - 0.5, u - 0.5, 0, v], 1, S); // left edge
-  grid((u, v) => [0.5, v - 0.5, u - 0.5, 1, v], 1, S); // right edge
-  grid((u) => [u - 0.5, 0.5, 0, u, 1], S, 1); // top edge
-  grid((u) => [u - 0.5, -0.5, 0, u, 0], S, 1); // bottom edge
-  return { verts: new Float32Array(verts), idx: new Uint16Array(idx) };
-}
-
-/* ------------------------------------------------------------------- atlas */
-
-/** One decoded image per URL per document, shared by every instance. */
-const imageCache = new Map();
-const imagePending = new Map();
-
-function loadImage(url) {
-  if (imageCache.has(url)) return Promise.resolve(imageCache.get(url) ?? null);
-  const pending = imagePending.get(url);
-  if (pending) return pending;
-  const p = new Promise((resolve) => {
-    const img = new window.Image();
-    // Without this the atlas canvas is tainted the moment a cross-origin
-    // picture lands on it and the texture upload throws.
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      imageCache.set(url, img);
-      resolve(img);
-    };
-    img.onerror = () => {
-      imageCache.set(url, null);
-      resolve(null);
-    };
-    img.src = url;
-  });
-  imagePending.set(url, p);
-  return p;
-}
-
-/**
- * Some hosts serve a picture but send no Access-Control-Allow-Origin header.
- * WebGL has to read the pixels, so the browser refuses those outright. When the
- * direct load fails, the URL is retried through this proxy, which fetches the
- * picture server-side and serves it back with the header. Pass a different
- * template (with {url}) as the `imageProxy` prop, or "" to switch it off and
- * fall back to a built-in picture instead. Your image addresses are sent to
- * whichever proxy you name, so for a shop prefer hosting the pictures yourself
- * or pointing this at your own proxy route.
- */
-const DEFAULT_IMAGE_PROXY = "https://images.weserv.nl/?url={url}";
-
-function proxied(url, template) {
-  if (!template || !url) return "";
-  // Already proxied, a data: URI or a same-origin path: nothing to route.
-  if (/^(data:|blob:)/i.test(url)) return "";
-  if (!/^https?:\/\//i.test(url)) return "";
-  if (template.indexOf(url) >= 0) return "";
-  return template.replace("{url}", encodeURIComponent(url));
-}
-
-/** Whether a decoded picture can actually be drawn into a canvas we then read.
- * A host that sends no CORS header taints it, and the atlas upload would throw.
- * Tested per picture, so one bad host costs that slot only. */
-let taintScratch = null;
-function canUseImage(img) {
-  try {
-    if (!taintScratch) {
-      taintScratch = document.createElement("canvas");
-      taintScratch.width = 1;
-      taintScratch.height = 1;
-    }
-    const ctx = taintScratch.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return false;
-    ctx.clearRect(0, 0, 1, 1);
-    ctx.drawImage(img, 0, 0, 1, 1);
-    ctx.getImageData(0, 0, 1, 1);
-    return true;
-  } catch {
-    console.warn(
-      "ClothingFlip: this picture's host sends no CORS header, so it is being retried through the image proxy — " +
-        (img?.src || "")
-    );
-    return false;
-  }
-}
-
-/** The entry's own picture, else a built-in one, else null (a numbered stand-in). */
-async function loadWithFallback(src, i, proxy) {
-  const tries = [
-    src,
-    proxied(src, proxy),
-    FALLBACK_IMAGES[i % FALLBACK_IMAGES.length],
-  ].filter((s, idx, a) => s && a.indexOf(s) === idx);
-  for (const url of tries) {
-    const img = await loadImage(url);
-    if (img && canUseImage(img)) return img;
-  }
-  return null;
-}
-
-function drawPlaceholder(ctx, index, x, y, w, h) {
-  const hue = (index * 47) % 360;
-  const grad = ctx.createLinearGradient(x, y, x + w, y + h);
-  grad.addColorStop(0, `hsl(${hue}, 22%, 27%)`);
-  grad.addColorStop(0.55, `hsl(${hue}, 18%, 13%)`);
-  grad.addColorStop(1, `hsl(${(hue + 40) % 360}, 24%, 23%)`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
-  ctx.lineWidth = Math.max(1, Math.round(w * 0.008));
-  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-  ctx.fillStyle = "rgba(255,255,255,0.68)";
-  ctx.font = `500 ${Math.round(Math.min(w, h) * 0.26)}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(String(index + 1).padStart(2, "0"), x + w / 2, y + h / 2);
-}
-
-/**
- * Draw every picture into one canvas of square cells and return it with each
- * picture's rect and aspect. A list that repeats one address gets one cell, and
- * the canvas is a power of two so WebGL1 can mipmap it, which is what makes
- * garments seen almost edge-on look clean.
- */
-async function buildAtlas(sources, proxy) {
-  const list = sources.length ? sources : [""];
-  const unique = [];
-  const slot = list.map((src, i) => {
-    const key = src || `\u0000${i}`; // empty entries stay separate stand-ins
-    let at = unique.findIndex((u) => u.key === key);
-    if (at < 0) {
-      unique.push({ key, src, i });
-      at = unique.length - 1;
-    }
-    return at;
-  });
-  const images = await Promise.all(unique.map((u) => loadWithFallback(u.src, u.i, proxy)));
-
-  const n = unique.length;
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  const cell = Math.min(CELL_MAX, prevPow2(Math.floor(ATLAS_MAX / Math.max(cols, rows))));
-  const canvas = document.createElement("canvas");
-  canvas.width = nextPow2(cols * cell);
-  canvas.height = nextPow2(rows * cell);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  const cells = [];
-  for (let i = 0; i < n; i++) {
-    const cx = (i % cols) * cell;
-    const cy = Math.floor(i / cols) * cell;
-    const img = images[i];
-    const aspect =
-      img && img.naturalHeight > 0
-        ? img.naturalWidth / img.naturalHeight
-        : PLACEHOLDER_ASPECTS[i % PLACEHOLDER_ASPECTS.length];
-    // Contained, never stretched: the cell holds the whole picture on its own
-    // proportions.
-    const w = aspect >= 1 ? cell : cell * aspect;
-    const h = aspect >= 1 ? cell / aspect : cell;
-    const dx = cx + (cell - w) / 2;
-    const dy = cy + (cell - h) / 2;
-    if (img) ctx.drawImage(img, dx, dy, w, h);
-    else drawPlaceholder(ctx, i, dx, dy, w, h);
-
-    // A texel of inset on every side: mipmaps average across cell borders
-    // otherwise, and a garment seen at a grazing angle is deep in the mip chain.
-    const u0 = (dx + 1) / canvas.width;
-    const u1 = (dx + w - 1) / canvas.width;
-    const vTop = 1 - (dy + 1) / canvas.height;
-    const vBottom = 1 - (dy + h - 1) / canvas.height;
-    cells.push({ rect: [u0, vBottom, u1, vTop], aspect });
-  }
-
-  // Every picture was checked before it got here, so the canvas is clean and
-  // one unusable host costs its own slot rather than the whole rail.
-  return { canvas, cells: slot.map((at) => cells[at]) };
-}
-
-/* ------------------------------------------------------------------- scene */
-
-function compile(gl, type, src) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-    console.warn("ClothingFlip shader:", gl.getShaderInfoLog(s));
-  return s;
-}
-
-/** Column-major perspective matrix. */
-function perspective(out, fovDeg, aspect, near, far) {
-  const f = 1 / Math.tan((fovDeg * Math.PI) / 360);
-  out.fill(0);
-  out[0] = f / aspect;
-  out[5] = f;
-  out[10] = (far + near) / (near - far);
-  out[11] = -1;
-  out[14] = (2 * far * near) / (near - far);
-}
-
-const FLOAT_UNIFORMS = [
-  "uPageThickness", "uPageWidth", "uPageHeight", "uMeshCount", "uPageSpacing",
-  "uScrollY", "uSpeedY", "uRestYaw", "uPart", "uSway", "uTime", "uFocusIndex",
-  "uFocusProgress", "uFocusScale", "uFocusZ", "uPageAspect", "uHoverIndex",
-  "uHoverMix",
-];
-
-class ClothingScene {
-  constructor(host, canvas, cfg, hooks) {
-    this.host = host;
-    this.canvas = canvas;
-    this.cfg = cfg;
-    this.hooks = hooks;
-    this.width = 1;
-    this.height = 1;
-    this.dpr = 1;
-    this.frameId = 0;
-    this.lastT = 0;
-    this.disposed = false;
-    this.atlasToken = 0;
-    this.atlasKey = "";
-    this.atlasTex = null;
-    this.settingsCache = null;
-    this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    // Where the input has pushed the rail, and the eased value it rides.
-    this.scroll = { target: 0, current: 0, speed: 0 };
-    this.drag = { active: false, lastX: 0, id: -1 };
-    // Which garment is being held up, how far out of the line it has travelled,
-    // and which way it is going. `index` outlives `target` reaching 0, because
-    // the garment keeps its identity all the way back into the rail.
-    this.focus = { index: -1, t: 0, target: 0, queued: -1, fast: false };
-    // Where the pointer went down, and which garment was under it at that moment:
-    // the rail is still drifting, so by the time a press is let go the garment
-    // the user aimed at is no longer at those coordinates.
-    this.tap = { x: 0, y: 0, at: 0, id: -1, hit: -1 };
-    // The pointer, and which garment it is over. `index` outlives `target` going
-    // to -1 so the card can fade back out instead of snapping.
-    this.pointer = { x: 0, y: 0, over: false, moved: false };
-    this.hover = { index: -1, mix: 0, target: -1, lastAt: 0, lastScroll: 0 };
-
-    const gl = canvas.getContext("webgl", {
-      antialias: true,
-      alpha: true,
-      premultipliedAlpha: true,
-    });
-    if (!gl) throw new Error("no webgl");
-    this.gl = gl;
-
-    const prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, PAGE_VERTEX));
-    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, PAGE_FRAGMENT));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      console.warn("ClothingFlip link:", gl.getProgramInfoLog(prog));
-      throw new Error("link failed");
-    }
-    gl.useProgram(prog);
-    this.prog = prog;
-    this.loc = {};
-    for (const n of [
-      ...FLOAT_UNIFORMS, "uProj", "uIndex", "uFocusXY", "uRect", "uAspect",
-      "uPick", "uAtlas",
-    ]) {
-      this.loc[n] = gl.getUniformLocation(prog, n);
-    }
-    gl.uniform1i(this.loc.uAtlas, 0);
-
-    // Geometry, built once: the garment's real size is applied in the vertex shader.
-    const box = buildBox();
-    this.indexCount = box.idx.length;
-    this.vbuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbuf);
-    gl.bufferData(gl.ARRAY_BUFFER, box.verts, gl.STATIC_DRAW);
-    this.ibuf = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibuf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, box.idx, gl.STATIC_DRAW);
-    const aPos = gl.getAttribLocation(prog, "position");
-    const aUv = gl.getAttribLocation(prog, "uv");
-    gl.enableVertexAttribArray(aPos);
-    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 20, 0);
-    gl.enableVertexAttribArray(aUv);
-    gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 20, 12);
-
-    // A clear 1x1 to draw with while the real atlas is still decoding: nothing shows until the pictures land.
-    this.blank = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.blank);
-    gl.texImage2D(
-      gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-      new Uint8Array([0, 0, 0, 0])
-    );
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
-    gl.disable(gl.CULL_FACE); // both faces of a garment can be seen
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-
-    // Per-garment data, written once and read at draw time.
-    this.rects = new Float32Array(MAX_PAGES * 4);
-    this.aspects = new Float32Array(MAX_PAGES).fill(1);
-    for (let i = 0; i < MAX_PAGES; i++) this.rects.set([0, 0, 1, 1], i * 4);
-
-    this.u = { uPageAspect: 1 };
-    for (const n of FLOAT_UNIFORMS) if (!(n in this.u)) this.u[n] = 0;
-    this.u.uFocusIndex = -1;
-    this.u.uFocusXY = [0, 0];
-    this.u.uHoverIndex = -1;
-    this.proj = new Float32Array(16);
-
-    // The ID buffer for picking, sized on demand.
-    this.pickFbo = null;
-    this.pickTex = null;
-    this.pickDepth = null;
-    this.pickW = 0;
-    this.pickH = 0;
-    this.pickBuf = new Uint8Array(4);
-
-    this.applyConfig();
-    this.loadAtlas();
-  }
-
-  settings() {
-    if (!this.settingsCache) {
-      this.settingsCache = settingsFor(this.cfg, this.width, this.height);
-    }
-    return this.settingsCache;
-  }
-
-  /* ---- everything the panel owns is a uniform or a per-garment value ---- */
-
-  applyConfig() {
-    const S = this.settings();
-    const u = this.u;
-    u.uMeshCount = S.pages;
-    u.uPageWidth = S.pageWidth;
-    u.uPageHeight = S.pageHeight;
-    u.uPageThickness = S.thickness;
-    u.uPageSpacing = S.pageSpacing;
-    u.uRestYaw = S.restYaw;
-    u.uPart = S.part;
-    u.uSway = S.sway;
-    u.uPageAspect = S.pageWidthPx / S.pageHeightPx;
-    u.uFocusScale = S.focusScale;
-    u.uFocusZ = S.focusZ;
-    u.uFocusXY = [S.focusX, S.focusY];
-    // A garment that has just been configured out of existence cannot be left
-    // held up with nothing to put it back.
-    if (this.focus.index >= S.pages || !S.tapToView) this.clearFocus();
-  }
-
-  clearFocus() {
-    const had = this.focus.index >= 0 && this.focus.target === 1;
-    this.focus.index = -1;
-    this.focus.t = 0;
-    this.focus.target = 0;
-    this.u.uFocusIndex = -1;
-    this.u.uFocusProgress = 0;
-    if (had) this.hooks.onClose?.();
-  }
-
-  /** Which picture each garment shows: the list, repeated across the deck. */
-  writeCells() {
-    const cells = this.atlas?.cells;
-    if (!cells || !cells.length) return;
-    for (let i = 0; i < MAX_PAGES; i++) {
-      const c = cells[i % cells.length];
-      this.rects.set(c.rect, i * 4);
-      this.aspects[i] = c.aspect;
-    }
-  }
-
-  sourceList() {
-    const list = this.cfg.items;
-    if (list && list.length) return list.map((item) => item.src);
-    return Array.from({ length: PLACEHOLDER_COUNT }, () => "");
-  }
-
-  loadAtlas() {
-    const sources = this.sourceList();
-    const key = `${this.cfg.imageProxy}::${sources.join("|")}`;
-    // Keyed on the list, not on whether the build has landed: a config change
-    // that arrives while pictures are still decoding must not start a second build.
-    if (key === this.atlasKey) return;
-    this.atlasKey = key;
-    const token = ++this.atlasToken;
-    buildAtlas(sources, this.cfg.imageProxy)
-      .then((atlas) => {
-        if (this.disposed || token !== this.atlasToken || !atlas) return;
-        const gl = this.gl;
-        const tex = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        // The rects assume v runs up, so the canvas is uploaded flipped.
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        // Premultiplied, so a garment's edge mixes into the mip chain without a
-        // dark halo from the transparent pixels round it.
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas.canvas);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.generateMipmap(gl.TEXTURE_2D);
-        // The point of this component is garments seen almost edge-on, which is
-        // exactly what trilinear filtering alone blurs to mush.
-        const ext = gl.getExtension("EXT_texture_filter_anisotropic");
-        if (ext) {
-          const max = gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-          gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, max));
-        }
-        if (this.atlasTex) gl.deleteTexture(this.atlasTex);
-        this.atlasTex = tex;
-        this.atlas = atlas;
-        this.writeCells();
-      })
-      .catch(() => {});
-  }
-
-  /* ------------------------------------------------------------- draw ---- */
-
-  applyUniforms() {
-    const gl = this.gl;
-    const L = this.loc;
-    for (const n of FLOAT_UNIFORMS) gl.uniform1f(L[n], this.u[n]);
-    gl.uniform2f(L.uFocusXY, this.u.uFocusXY[0], this.u.uFocusXY[1]);
-    gl.uniformMatrix4fv(L.uProj, false, this.proj);
-  }
-
-  drawPages(pick) {
-    const gl = this.gl;
-    const L = this.loc;
-    const n = this.settings().pages;
-    gl.uniform1f(L.uPick, pick ? 1 : 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.atlasTex || this.blank);
-    for (let i = 0; i < n; i++) {
-      gl.uniform1f(L.uIndex, i);
-      gl.uniform4f(
-        L.uRect,
-        this.rects[i * 4], this.rects[i * 4 + 1], this.rects[i * 4 + 2], this.rects[i * 4 + 3]
-      );
-      gl.uniform1f(L.uAspect, this.aspects[i]);
-      gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);
-    }
-  }
-
-  /* ------------------------------------------------------------- pick ---- */
-
-  ensurePick(w, h) {
-    const gl = this.gl;
-    if (this.pickFbo && this.pickW === w && this.pickH === h) return;
-    if (this.pickFbo) {
-      gl.deleteFramebuffer(this.pickFbo);
-      gl.deleteTexture(this.pickTex);
-      gl.deleteRenderbuffer(this.pickDepth);
-    }
-    this.pickTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.pickTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this.pickDepth = gl.createRenderbuffer();
-    gl.bindRenderbuffer(gl.RENDERBUFFER, this.pickDepth);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
-    this.pickFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.pickFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.pickTex, 0);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.pickDepth);
-    this.pickW = w;
-    this.pickH = h;
-  }
-
-  /**
-   * Which garment is drawn at a point, answered by drawing it: the deck is
-   * re-rendered through the same vertex shader with each garment's index written
-   * out as a colour, and the pixel under the pointer is read back.
-   */
-  pick(clientX, clientY) {
-    const rect = this.host.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return -1;
-    // Normalised against the box that is actually on screen, so a browser or CSS
-    // zoom above the frame cannot slide every hit sideways.
-    const u = (clientX - rect.left) / rect.width;
-    const v = (clientY - rect.top) / rect.height;
-    if (u < 0 || v < 0 || u >= 1 || v >= 1) return -1;
-
-    // One scale for both axes, so the ID buffer keeps the camera's aspect.
-    const scale = Math.min(1, PICK_MAX / Math.max(this.width, this.height));
-    const tw = Math.max(1, Math.round(this.width * scale));
-    const th = Math.max(1, Math.round(this.height * scale));
-    const gl = this.gl;
-    this.ensurePick(tw, th);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.pickFbo);
-    gl.viewport(0, 0, tw, th);
-    gl.disable(gl.BLEND);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    this.applyUniforms();
-    this.drawPages(true);
-    gl.readPixels(
-      Math.min(tw - 1, Math.floor(u * tw)),
-      Math.min(th - 1, Math.floor((1 - v) * th)), // rows count from the bottom
-      1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.pickBuf
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.enable(gl.BLEND);
-
-    const hit = this.pickBuf[0] - 1;
-    return hit >= 0 && hit < this.settings().pages ? hit : -1;
-  }
-
-  /** Which garment the pointer is over has changed. */
-  setHover(hit) {
-    if (hit === this.hover.target) return;
-    this.hover.target = hit;
-    if (hit >= 0 && this.hover.index !== hit) {
-      this.hover.index = hit;
-      // Moving straight from one card to the next re-triggers the highlight.
-      this.hover.mix = Math.min(this.hover.mix, 0.35);
-    }
-    this.hooks.onHover?.(hit);
-  }
-
-  /** Open a garment, or (with one up) put it back. */
-  open(index) {
-    this.focus.index = index;
-    this.focus.target = 1;
-    this.hooks.onOpen?.(index);
-  }
-
-  close() {
-    const f = this.focus;
-    if (f.index >= 0 && (f.target === 1 || f.queued >= 0)) {
-      f.queued = -1;
-      f.fast = false;
-      f.target = 0;
-      this.hooks.onClose?.();
-    }
-  }
-
-  /** With one held up: put it back and bring the next one (dir 1) or the
-   * previous one (dir -1) out of the rail, at twice the usual pace. */
-  browse(dir) {
-    const f = this.focus;
-    if (f.index < 0 || (f.target !== 1 && f.queued < 0)) return;
-    const n = this.settings().pages;
-    const from = f.queued >= 0 ? f.queued : f.index;
-    const next = (((from + dir) % n) + n) % n;
-    f.queued = next;
-    f.target = 0;
-    f.fast = true;
-    this.hooks.onBrowse?.(next);
-  }
-
-  onTap(hit) {
-    if (!this.settings().tapToView) return;
-    if (this.focus.index >= 0) {
-      this.close();
-      return;
-    }
-    if (hit >= 0) this.open(hit);
-  }
-
-  /* ------------------------------------------------------------ input ---- */
-
-  onKeyDown = (event) => {
-    if (event.key === "Escape") {
-      this.close();
-    } else if ((event.key === "ArrowRight" || event.key === "ArrowLeft") && this.focus.index >= 0) {
-      event.preventDefault();
-      this.browse(event.key === "ArrowRight" ? 1 : -1);
-    }
-  };
-
-  wheelScale(event) {
-    // deltaMode 1 is lines and 2 is pages; both have to become pixels.
-    if (event.deltaMode === 1) return 16;
-    if (event.deltaMode === 2) return this.height;
-    return 1;
-  }
-
-  onWheel = (event) => {
-    if (this.disposed) return;
-    // A garment is being read; the line it came out of holds still under it.
-    if (this.focus.index >= 0) return;
-    if (this.cfg.scrollLock && event.cancelable) event.preventDefault();
-    const scale = this.wheelScale(event);
-    const dx = event.deltaX * scale;
-    const dy = event.deltaY * scale;
-    // Whichever axis the gesture is on wins: a trackpad's sideways swipe or a
-    // mouse wheel both drive the rail.
-    const dominant = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-    const S = this.settings();
-    this.push(dominant * S.worldPerPx * S.wheel);
-  };
-
-  onPointerDown = (event) => {
-    if (this.disposed || event.button !== 0) return;
-    // Answered against the frame the user was looking at when they pressed.
-    // The hit is taken first and the clock started after, so a slow device's
-    // pick cannot eat the tap's time allowance.
-    const hit =
-      this.focus.index < 0 && this.settings().tapToView
-        ? this.pick(event.clientX, event.clientY)
-        : -1;
-    this.tap = {
-      x: event.clientX,
-      y: event.clientY,
-      at: performance.now(),
-      id: event.pointerId,
-      hit,
-    };
-    this.host.setPointerCapture?.(event.pointerId);
-    // The rail does not scroll under a garment being read, but the press is
-    // still tracked so that letting go can put it back.
-    if (this.focus.index >= 0) return;
-    this.drag.active = true;
-    this.drag.lastX = event.clientX;
-    this.drag.id = event.pointerId;
-  };
-
-  onPointerMove = (event) => {
-    if (event.pointerType === "touch") {
-      this.pointer.over = false;
-    } else {
-      this.pointer.x = event.clientX;
-      this.pointer.y = event.clientY;
-      this.pointer.over = true;
-      this.pointer.moved = true;
-    }
-    if (!this.drag.active || event.pointerId !== this.drag.id) return;
-    const delta = this.drag.lastX - event.clientX;
-    this.drag.lastX = event.clientX;
-    // Finger travel is shorter than wheel travel, so it is scaled up.
-    const S = this.settings();
-    this.push(delta * 2 * S.worldPerPx * S.wheel);
-  };
-
-  onPointerUp = (event) => {
-    if (event.pointerId === this.drag.id) {
-      this.drag.active = false;
-      this.drag.id = -1;
-    }
-    if (event.pointerId !== this.tap.id) return;
-    this.host.releasePointerCapture?.(event.pointerId);
-    this.tap.id = -1;
-    // A press that stayed put and was let go quickly is a tap; anything else was
-    // a drag on the rail and must not also open a garment.
-    const moved = Math.hypot(event.clientX - this.tap.x, event.clientY - this.tap.y);
-    if (moved <= TAP_SLOP && performance.now() - this.tap.at <= TAP_MS) {
-      this.onTap(this.tap.hit);
-    }
-  };
-
-  onPointerLeave = () => {
-    this.pointer.over = false;
-  };
-
-  onPointerCancel = (event) => {
-    if (event.pointerId === this.drag.id) {
-      this.drag.active = false;
-      this.drag.id = -1;
-    }
-    if (event.pointerId === this.tap.id) {
-      this.host.releasePointerCapture?.(event.pointerId);
-      this.tap.id = -1;
-    }
-  };
-
-  push(worldDelta) {
-    if (!isFinite(worldDelta)) return;
-    this.scroll.target += worldDelta;
-    this.scroll.speed += worldDelta;
-  }
-
-  attach() {
-    const n = this.host;
-    n.addEventListener("wheel", this.onWheel, { passive: false });
-    n.addEventListener("pointerdown", this.onPointerDown);
-    n.addEventListener("pointermove", this.onPointerMove);
-    n.addEventListener("pointerup", this.onPointerUp);
-    n.addEventListener("pointercancel", this.onPointerCancel);
-    n.addEventListener("pointerleave", this.onPointerLeave);
-    // Escape closes what a tap opened.
-    window.addEventListener("keydown", this.onKeyDown);
-  }
-
-  detach() {
-    const n = this.host;
-    n.removeEventListener("wheel", this.onWheel);
-    n.removeEventListener("pointerdown", this.onPointerDown);
-    n.removeEventListener("pointermove", this.onPointerMove);
-    n.removeEventListener("pointerup", this.onPointerUp);
-    n.removeEventListener("pointercancel", this.onPointerCancel);
-    n.removeEventListener("pointerleave", this.onPointerLeave);
-    window.removeEventListener("keydown", this.onKeyDown);
-  }
-
-  /* ------------------------------------------------------------- host ---- */
-
-  setSize(width, height) {
-    if (this.disposed) return;
-    this.width = Math.max(1, width);
-    this.height = Math.max(1, height);
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.canvas.width = Math.max(1, Math.round(this.width * this.dpr));
-    this.canvas.height = Math.max(1, Math.round(this.height * this.dpr));
-    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    perspective(this.proj, CAM_FOV, this.width / this.height, 0.1, 200);
-    this.settingsCache = null;
-    this.applyConfig();
-  }
-
-  updateConfig(cfg) {
-    if (this.disposed) return;
-    this.cfg = cfg;
-    this.settingsCache = null;
-    // Only the picture list owns a texture, and loadAtlas is a no-op when the
-    // list has not changed. Everything else is a uniform or a per-garment value.
-    this.loadAtlas();
-    this.applyConfig();
-    this.writeCells();
-  }
-
-  setCursor(value) {
-    if (this.host.style.cursor !== value) this.host.style.cursor = value;
-  }
-
-  start() {
-    this.attach();
-    this.lastT = performance.now();
-    const loop = () => {
-      if (this.disposed) return;
-      this.frameId = requestAnimationFrame(loop);
-      this.step();
-    };
-    this.frameId = requestAnimationFrame(loop);
-  }
-
-  step() {
-    const now = performance.now();
-    let dt = (now - this.lastT) / 1000;
-    this.lastT = now;
-    if (!isFinite(dt) || dt < 0) dt = 0;
-    // A background tab must not deposit a minute of drift in one frame.
-    if (dt > 0.05) dt = 0.05;
-
-    const S = this.settings();
-    const u = this.u;
-    const gl = this.gl;
-
-    // The one blend, played forwards on a tap and backwards on the next. Linear
-    // in time and eased on the way to the shader, so opening and closing are the
-    // same curve read in opposite directions.
-    if (this.focus.index >= 0) {
-      const base = dt / Math.max(0.05, S.viewDuration);
-      const rate = this.focus.fast ? base * 2.4 : base;
-      this.focus.t = Math.min(1, Math.max(0, this.focus.t + (this.focus.target ? rate : -rate)));
-      if (this.focus.t === 0 && this.focus.target === 0) {
-        if (this.focus.queued >= 0) {
-          // Browsing: the last one is home, so the next comes out.
-          this.focus.index = this.focus.queued;
-          this.focus.queued = -1;
-          this.focus.target = 1;
-        } else {
-          this.focus.index = -1;
-        }
-      }
-      if (this.focus.t === 1) this.focus.fast = false;
-    }
-    u.uTime = (now / 1000) % 3600;
-    u.uFocusIndex = this.focus.index;
-    u.uFocusProgress = power2InOut(this.focus.t);
-
-    this.setCursor(
-      this.focus.index >= 0 && (this.focus.target === 1 || this.focus.queued >= 0)
-        ? "zoom-out"
-        : this.drag.active
-          ? "grabbing"
-          : this.hover.target >= 0
-            ? "pointer"
-            : "grab"
-    );
-
-    // The rail holds still under a garment being read, while it travels back,
-    // and while the pointer is on one, so what you are aiming at does not slide
-    // away. "Reduce motion" turns the drift off.
-    if (
-      S.driftPerSecond !== 0 && this.focus.index < 0 && !this.reduced.matches &&
-      this.hover.target < 0 && !this.drag.active
-    ) {
-      this.push(S.driftPerSecond * dt);
-    }
-
-    // Frame-rate independent forms of per-frame constants, so a 120Hz display
-    // does not settle twice as fast and curl half as hard.
-    const k = dt * 60;
-    const ease = 1 - Math.pow(1 - S.lerp, k);
-    this.scroll.current += (this.scroll.target - this.scroll.current) * ease;
-    this.scroll.speed *= Math.pow(0.835, k);
-
-    // The shader wraps on one full rail length, so walking both ends of the
-    // lerp back by exactly that is invisible, and it keeps a rail scrolled
-    // for an hour inside float precision.
-    const period = S.pages * S.pageSpacing;
-    if (Math.abs(this.scroll.current) > period) {
-      const wrap = Math.sign(this.scroll.current) * period;
-      this.scroll.current -= wrap;
-      this.scroll.target -= wrap;
-    }
-
-    u.uScrollY = this.scroll.current;
-    u.uSpeedY = this.scroll.speed;
-
-    // Which card is under the pointer. The deck is re-checked a few times a
-    // second, and only when the pointer or the rail has actually moved.
-    const h = this.hover;
-    const canHover =
-      this.cfg.hoverEffect && S.tapToView && this.pointer.over &&
-      !this.drag.active && this.focus.index < 0;
-    if (canHover) {
-      const moved = this.pointer.moved || Math.abs(this.scroll.current - h.lastScroll) > 1e-3;
-      if (moved && now - h.lastAt > HOVER_MS) {
-        h.lastAt = now;
-        h.lastScroll = this.scroll.current;
-        this.pointer.moved = false;
-        this.setHover(this.pick(this.pointer.x, this.pointer.y));
-      }
-    } else if (h.target !== -1) {
-      this.setHover(-1);
-    }
-    const goal = h.target >= 0 ? 1 : 0;
-    h.mix += (goal - h.mix) * (1 - Math.pow(0.0001, dt));
-    if (goal === 0 && h.mix < 0.01) {
-      h.mix = 0;
-      h.index = -1;
-    }
-    u.uHoverIndex = h.index;
-    u.uHoverMix = h.mix;
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    this.applyUniforms();
-    this.drawPages(false);
-  }
-
-  dispose() {
-    this.disposed = true;
-    cancelAnimationFrame(this.frameId);
-    this.detach();
-    const gl = this.gl;
-    if (this.atlasTex) gl.deleteTexture(this.atlasTex);
-    gl.deleteTexture(this.blank);
-    gl.deleteBuffer(this.vbuf);
-    gl.deleteBuffer(this.ibuf);
-    if (this.pickFbo) {
-      gl.deleteFramebuffer(this.pickFbo);
-      gl.deleteTexture(this.pickTex);
-      gl.deleteRenderbuffer(this.pickDepth);
-    }
-    gl.deleteProgram(this.prog);
-    // No loseContext(): getContext returns the same context per canvas, so a
-    // StrictMode remount would reuse a force-lost one.
-  }
-}
-
-/* --------------------------------------------------------------- component */
-
-const SANS = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-const SERIF = "'Instrument Serif', 'Playfair Display', Georgia, 'Times New Roman', serif";
-
-function Arrow({ dir, onClick, color }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={dir < 0 ? "Previous product" : "Next product"}
-      style={{
-        position: "absolute",
-        top: "calc((100% - var(--cf-reserve)) / 2)",
-        [dir < 0 ? "left" : "right"]: "clamp(10px, 5%, 56px)",
-        transform: "translateY(-50%)",
-        width: 46,
-        height: 46,
-        borderRadius: 999,
-        border: `1px solid ${color}66`,
-        background: "transparent",
-        color,
-        cursor: "pointer",
-        display: "grid",
-        placeItems: "center",
-        pointerEvents: "auto",
-        padding: 0,
-      }}
-    >
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path
-          d={dir < 0 ? "M10 3 5 8l5 5" : "M6 3l5 5-5 5"}
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </button>
-  );
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num2 = (n) => String(n).padStart(2, "0");
+const num = (v, fb) => (typeof v === "number" && isFinite(v) ? v : fb);
+
+function buildHtml(P) {
+  return `
+<div class="art" data-k="art">
+  <div class="about ui dim" data-k="about"></div>
+  <div class="logo dim" data-k="logo"></div>
+  <div class="contact ui dim dimmer" data-k="contact"></div>
+  <div class="rail dim"></div>
+  <div class="rack dim" data-k="rack"></div>
+  <div class="cap dimmer" data-k="cap"><b data-k="capn"></b><span data-k="capp"></span></div>
+  <button class="avail pill ui dim dimmer" data-k="avail"></button>
+  <div class="band dimmer" data-k="band"><div class="track" data-k="track"></div></div>
+  <div class="det" data-k="det">
+    <div class="hit" data-k="hit"></div>
+    <div class="big2" data-k="big2"></div>
+    <div class="big" data-k="big"></div>
+    <button class="arr prev" data-k="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="arr next" data-k="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    <div class="info" data-k="info"><div class="num" data-k="num"></div><div class="name" data-k="name"></div><div class="price" data-k="price"></div><button class="pill ui" data-k="avail2"></button></div>
+    <button class="close ui" data-k="close"></button>
+  </div>
+</div>`;
 }
 
 export default function ClothingFlip({
-  images = DEFAULT_PRODUCTS,
-  background = "#0E0E10",
-  pages = 10,
-  spacing = 5,
-  sideTurn = 8,
-  garmentWidth = 300,
-  garmentHeight = 360,
-  tap = true,
-  zoom = 5,
-  openSpeed = 5,
-  drift = 1.5,
-  smoothing = 5,
-  sway = 5,
-  scrollSens = 5,
-  scrollLock = true,
-  showDetails = true,
-  showRail = true,
-  railColor = "#C9CBD1",
-  imageProxy = DEFAULT_IMAGE_PROXY,
-  hoverEffect = true,
-  hoverLabel = true,
-  buyLabel = "See availability",
-  captionColor = "#F4F4F5",
-  onBuy,
-  onOpen,
-  onClose,
-  style,
+  brand = "Offcut",
+  aboutLabel = "About",
+  contactLabel = "Contact",
+  products = DEFAULT_PRODUCTS,
+  marquee = DEFAULT_MARQUEE,
+  availabilityLabel = "See availability",
+  closeLabel = "Close",
+  driftSpeed = 48,
+  spacing = 150,
+  garmentSize = 100,
+  frontSheet = FRONT_SHEET,
+  sideSheet = SIDE_SHEET,
+  background = "#0b0b0c",
+  textColor = "#f1efec",
+  mutedColor = "#8d8a86",
+  bandColor = "#b3121b",
+  style = {},
 }) {
-  const hostRef = useRef(null);
-  const canvasRef = useRef(null);
-  const sceneRef = useRef(null);
-  const [panel, setPanel] = useState({ index: -1, open: false });
-  const [hoverIdx, setHoverIdx] = useState(-1);
-  const tipRef = useRef(null);
-  const placeRef = useRef(null);
-  const lastPtr = useRef({ x: 0, y: 0 });
-  const [box, setBox] = useState({ w: 0, h: 0 });
-  const [railY, setRailY] = useState(-100);
+  const rootRef = useRef(null);
+  const propsRef = useRef({});
+  propsRef.current = { garmentSize, spacing, driftSpeed, brand, aboutLabel, contactLabel, products, marquee, availabilityLabel, closeLabel, frontSheet, sideSheet };
+  const apiRef = useRef({});
 
-  const items = useMemo(
-    () => (Array.isArray(images) ? images : []).map(itemOf),
-    [images]
-  );
-
-  // Rebuilt per render and read through a ref, so dragging a slider shows up on
-  // the next frame without the setup effect tearing the renderer down.
-  const cfg = {
-    items,
-    pages,
-    spacing,
-    sideTurn,
-    garmentWidth,
-    garmentHeight,
-    tap,
-    zoom,
-    openSpeed,
-    drift,
-    smoothing,
-    sway,
-    scrollSens,
-    scrollLock,
-    showDetails,
-    hoverEffect,
-    imageProxy,
-  };
-  const cfgRef = useRef(cfg);
-  cfgRef.current = cfg;
-
-  // Callbacks the scene calls, kept fresh without rebuilding it.
-  const live = useRef({});
-  live.current = { items, onBuy, onOpen, onClose };
-
-  useEffect(() => {
-    const host = hostRef.current;
-    const canvas = canvasRef.current;
-    if (!host || !canvas) return;
-    let scene;
-    try {
-      scene = new ClothingScene(host, canvas, cfgRef.current, {
-        onOpen: (index) => {
-          setPanel({ index, open: true });
-          const list = live.current.items;
-          if (list.length) live.current.onOpen?.(list[index % list.length], index % list.length);
-        },
-        onBrowse: (index) => {
-          setPanel({ index, open: true });
-          const list = live.current.items;
-          if (list.length) live.current.onOpen?.(list[index % list.length], index % list.length);
-        },
-        onClose: () => {
-          setPanel((p) => ({ ...p, open: false }));
-          live.current.onClose?.();
-        },
-        onHover: (index) => setHoverIdx(index),
-      });
-    } catch {
-      // No WebGL: an empty frame rather than a thrown render.
-      return;
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    if (!document.querySelector("link[data-of-fonts]")) {
+      const l = document.createElement("link");
+      l.rel = "stylesheet";
+      l.href = FONTS_URL;
+      l.setAttribute("data-of-fonts", "");
+      document.head.appendChild(l);
     }
-    sceneRef.current = scene;
-    const measure = () => {
-      scene.setSize(host.clientWidth, host.clientHeight);
-      setBox({ w: host.clientWidth, h: host.clientHeight });
-    };
-    measure();
-    scene.start();
-    const ro = new ResizeObserver(measure);
-    ro.observe(host);
+    const P = () => propsRef.current;
+    root.innerHTML = buildHtml(P());
+    const q = (k) => root.querySelector(`[data-k="${k}"]`);
+    const art = q("art"), rack = q("rack"), cap = q("cap"), big = q("big"), big2 = q("big2");
+    const timers = [];
+    const later = (fn, ms) => { const t = setTimeout(fn, ms); timers.push(t); return t; };
 
-    // The hover label follows the pointer, written straight to the node so
-    // moving the mouse never re-renders React.
-    const placeTip = () => {
-      const tip = tipRef.current;
-      if (!tip) return;
-      const rect = host.getBoundingClientRect();
-      let x = lastPtr.current.x - rect.left + 16;
-      let y = lastPtr.current.y - rect.top + 18;
-      if (x + tip.offsetWidth > rect.width - 8) x = lastPtr.current.x - rect.left - tip.offsetWidth - 16;
-      if (y + tip.offsetHeight > rect.height - 8) y = lastPtr.current.y - rect.top - tip.offsetHeight - 14;
-      tip.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, y)}px)`;
+    let hov = -1; // the faced garment (an element index)
+    let open = -1; // the opened garment (an element index)
+    let openK = -1; // ... and which hoodie it shows
+    let pointerIn = false;
+    let L = { ...LAYOUTS.land };
+    let G = [];
+    let T = 0; // how many hangers ride the rail
+    let vx = []; // each hanger's current centre
+    let drift = 0; // how far the rail has travelled, in artboard px
+    let speed = 0; // current speed, easing toward the target
+    let builtKey = "";
+    let gTop = 0;
+    let artK = 1; // artboard scale, to turn screen px into artboard px
+    let dragging = false;
+    let dragId = -1;
+    let dragX = 0;
+    let dragMoved = 0;
+    let dragSamples = [];
+    let momentum = 0; // px/s left over from a drag, fading out
+    let justDragged = false;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // garment size (a factor); the spacing and the parting gap follow it, so the gaps keep their proportion
+    const sz = () => Math.max(0.5, Math.min(1.6, num(P().garmentSize, 100) / 100));
+    const spacing = () => Math.max(60, Math.min(500, num(P().spacing, 150))) * sz();
+
+    const prod = (k) => {
+      const p = String((P().products || [])[k] || "").split("|").map((x) => x.trim());
+      return { name: p[0] || `Hoodie ${k + 1}`, price: p[1] || "" };
     };
-    const onMove = (e) => {
-      if (e.pointerType === "touch") return;
-      lastPtr.current = { x: e.clientX, y: e.clientY };
-      placeTip();
+
+    // paint hoodie k from a sprite sheet into an element, so the garment's crop box exactly fills it
+    const paint = (el, k, front) => {
+      const sh = front ? SHEETS.front : SHEETS.side;
+      const url = front ? P().frontSheet : P().sideSheet;
+      const ew = el.offsetWidth || L.GW;
+      const eh = el.offsetHeight || L.GH;
+      const sx = ew / BW;
+      const sy = eh / BH;
+      const x = sh.hx[k % COLS] - BW / 2;
+      const y = sh.hy[Math.floor(k / COLS)] - HOOK_UP;
+      el.style.backgroundImage = `url("${url}")`;
+      el.style.backgroundSize = `${sh.w * sx}px ${sh.h * sy}px`;
+      el.style.backgroundPosition = `${-x * sx}px ${-y * sy}px`;
     };
-    host.addEventListener("pointermove", onMove);
-    placeRef.current = placeTip;
+    const paintRail = () => G.forEach((g, j) => { paint(g.querySelector("i.s"), j % N, false); paint(g.querySelector("i.f"), j % N, true); });
+
+    const writeStatic = () => {
+      const p = P();
+      q("logo").textContent = p.brand;
+      q("about").textContent = p.aboutLabel;
+      q("contact").textContent = p.contactLabel;
+      q("avail").textContent = p.availabilityLabel;
+      q("avail2").textContent = p.availabilityLabel;
+      q("close").textContent = p.closeLabel;
+      const items = Array.isArray(p.marquee) && p.marquee.length ? p.marquee : DEFAULT_MARQUEE;
+      const frag = [];
+      for (let r0 = 0; r0 < 16; r0++) items.forEach((t) => frag.push(`<span>${esc(t)}</span>`));
+      q("track").innerHTML = frag.join("");
+      paintRail();
+      if (open >= 0) { paint(big, openK, true); fill(openK); }
+    };
+
+    const base = (j) => L.CX + (j - (T - 1) / 2) * spacing();
+    // every hanger rides the rail in a loop and wraps beyond the artboard edge, so it is never seen popping in
+    const applyDrift = () => {
+      const sp = spacing();
+      const len = T * sp;
+      const x0 = L.CX - len / 2;
+      G.forEach((g, j) => {
+        const b0 = base(j);
+        const p = x0 + ((((b0 - x0 - drift) % len) + len) % len);
+        vx[j] = p;
+        g.style.translate = `${p - b0}px 0`;
+      });
+      if (hov >= 0 && G[hov]) cap.style.left = `${vx[hov]}px`;
+    };
+    const layout = () => {
+      const sp = spacing();
+      void sp;
+      G.forEach((g, j) => {
+        let gap = 0;
+        if (hov >= 0 && j !== hov) gap = Math.sign(vx[j] - vx[hov]) * L.OPEN * sz();
+        g.style.left = `${base(j) + gap}px`;
+        g.classList.toggle("face", j === hov);
+      });
+      if (hov >= 0 && G[hov]) {
+        const d = prod(hov % N);
+        cap.style.left = `${vx[hov]}px`;
+        q("capn").textContent = d.name;
+        q("capp").textContent = d.price;
+        cap.classList.add("on");
+      } else cap.classList.remove("on");
+    };
+    // the element that shows hoodie k, nearest the middle of the rail
+    const elFor = (k) => {
+      let best = -1;
+      let bd = Infinity;
+      G.forEach((g, j) => {
+        if (j % N !== k) return;
+        const dd = Math.abs(vx[j] - L.CX);
+        if (dd < bd) { bd = dd; best = j; }
+      });
+      return best;
+    };
+    const buildRack = () => {
+      builtKey = `${spacing()}|${sz()}|${L.W}`;
+      const gw = L.GW * sz();
+      const gh = L.GH * sz();
+      T = Math.max(N, Math.ceil((L.W + gw * 1.3) / spacing()));
+      rack.innerHTML = Array.from({ length: T }, (_, j) => `<div class="g" data-i="${j}"><i class="s"></i><i class="f"></i></div>`).join("");
+      G = Array.from(rack.querySelectorAll(".g"));
+      // the garments hang from the rail whatever their size: the hook sits on the rail
+      gTop = L.RT - 6 - (HOOK_UP * gh) / BH;
+      G.forEach((g) => {
+        g.style.width = `${gw}px`;
+        g.style.height = `${gh}px`;
+        g.style.marginLeft = `${-gw / 2}px`;
+        g.style.top = `${gTop}px`;
+      });
+      cap.style.top = `${gTop + gh + 16}px`;
+      q("avail").style.top = `${Math.max(L.AV, gTop + gh + 86)}px`;
+      vx = G.map(() => 0);
+      hov = -1;
+      paintRail();
+      applyDrift();
+      if (open >= 0) {
+        open = elFor(openK);
+        if (open >= 0) G[open].style.visibility = "hidden";
+        hov = open;
+      }
+      layout();
+    };
+    const fill = (k) => {
+      const d = prod(k);
+      q("num").textContent = `${num2(k + 1)} / ${num2(N)}`;
+      q("name").textContent = d.name;
+      q("price").textContent = d.price;
+    };
+    const E = "cubic-bezier(.2,.8,.2,1)";
+    const lift = (j) => `translate(${vx[j] - L.CX}px, -8px) scale(${(L.GW * sz()) / bigW(L)})`;
+
+    const openG = (j) => {
+      if (open >= 0) return;
+      open = j;
+      openK = j % N;
+      hov = j;
+      layout();
+      big.getAnimations().forEach((a0) => a0.cancel());
+      paint(big, openK, true);
+      fill(openK);
+      root.classList.add("open");
+      big.animate([{ transform: lift(j), opacity: 1 }, { transform: "none", opacity: 1 }], { duration: 750, easing: E, fill: "forwards" });
+      G[j].style.visibility = "hidden";
+    };
+    const step = (d) => {
+      if (open < 0) return;
+      const fromK = openK;
+      G[open].style.visibility = "";
+      openK = (openK + d + N) % N;
+      open = elFor(openK);
+      fill(openK);
+      G[open].style.visibility = "hidden";
+      hov = open;
+      layout();
+      paint(big2, fromK, true);
+      big2.animate(
+        [{ transform: "none", opacity: 1, filter: "blur(0)" }, { transform: `translateX(${-d * 120}px) scale(.94)`, opacity: 0, filter: "blur(6px)" }],
+        { duration: 600, easing: E }
+      );
+      big.getAnimations().forEach((a0) => a0.cancel());
+      paint(big, openK, true);
+      big.animate(
+        [{ transform: `translateX(${d * 120}px) scale(.94)`, opacity: 0, filter: "blur(6px)" }, { transform: "none", opacity: 1, filter: "blur(0)" }],
+        { duration: 600, easing: E, fill: "forwards" }
+      );
+    };
+    const closeG = () => {
+      if (open < 0) return;
+      const j = open;
+      big.animate([{ transform: "none", opacity: 1 }, { transform: lift(j), opacity: 1 }], { duration: 650, easing: E, fill: "forwards" });
+      root.classList.remove("open");
+      later(() => {
+        if (G[j]) G[j].style.visibility = "";
+        big.getAnimations().forEach((a0) => a0.cancel());
+        big.style.opacity = "0";
+        open = -1;
+        openK = -1;
+        hov = -1;
+        layout();
+      }, 650);
+    };
+
+    // ── fit the artboard into the container: wide containers get a wider rail, narrow or tall ones the tall layout ──
+    let mode = "";
+    const fit = () => {
+      const cw = root.clientWidth || 1500;
+      const ch = root.clientHeight || 1000;
+      const m = cw / ch < 1.05 ? "port" : "land";
+      const bl = LAYOUTS[m];
+      const W = Math.min(Math.round(bl.W * 1.6), Math.max(bl.W, Math.round((bl.H * cw) / ch)));
+      if (m !== mode || W !== L.W) {
+        mode = m;
+        L = { ...bl, W, CX: W / 2 };
+        root.classList.toggle("pt", m === "port");
+        art.style.width = `${L.W}px`;
+        art.style.height = `${L.H}px`;
+        buildRack();
+      }
+      const k = Math.min(cw / L.W, ch / L.H);
+      artK = k;
+      art.style.transform = `scale(${k})`;
+      art.style.left = `${(cw - L.W * k) / 2}px`;
+      art.style.top = `${(ch - L.H * k) / 2}px`;
+    };
+
+    // ── input (delegated, because the hangers are rebuilt when the spacing or the width changes) ──
+    const listen = (t, ev, fn) => { t.addEventListener(ev, fn); return () => t.removeEventListener(ev, fn); };
+    const offs = [];
+    offs.push(
+      listen(rack, "pointerover", (e) => {
+        if (open >= 0 || dragging) return;
+        const g = e.target.closest && e.target.closest(".g");
+        if (!g) {
+          if (hov >= 0) { hov = -1; layout(); }
+          return;
+        }
+        const j = Number(g.dataset.i);
+        if (j !== hov) { hov = j; layout(); }
+      })
+    );
+    offs.push(listen(rack, "click", (e) => {
+      if (justDragged) return;
+      const g = e.target.closest && e.target.closest(".g");
+      if (g) openG(Number(g.dataset.i));
+    }));
+    // the trail area: the band the hoodies hang in (the rail and the garments beneath it)
+    const inTrail = (e) => {
+      const rc = art.getBoundingClientRect();
+      const y = (e.clientY - rc.top) / artK;
+      return y >= gTop - 12 && y <= gTop + L.GH * sz() + 12;
+    };
+    offs.push(
+      listen(rack, "pointermove", (e) => {
+        if (dragging || open >= 0) return;
+        rack.style.cursor = inTrail(e) ? "grab" : "";
+      })
+    );
+    // drag the trail sideways to slide it; let go and it carries on a little, then goes back to its own loop
+    offs.push(
+      listen(rack, "pointerdown", (e) => {
+        if (open >= 0 || (e.pointerType === "mouse" && e.button !== 0)) return;
+        if (!inTrail(e)) return;
+        dragging = true;
+        dragId = e.pointerId;
+        dragX = e.clientX;
+        dragMoved = 0;
+        dragSamples = [];
+        momentum = 0;
+        justDragged = false;
+      })
+    );
+    offs.push(
+      listen(window, "pointermove", (e) => {
+        if (!dragging || e.pointerId !== dragId) return;
+        const dx = e.clientX - dragX;
+        dragX = e.clientX;
+        dragMoved += Math.abs(dx);
+        if (dragMoved > 6) {
+          if (!root.classList.contains("drag")) {
+            root.classList.add("drag");
+            if (hov >= 0) { hov = -1; layout(); } // no parting while the trail is being dragged
+          }
+          drift -= dx / artK;
+          applyDrift();
+          const now = performance.now();
+          dragSamples.push([now, dx / artK]);
+          while (dragSamples.length && now - dragSamples[0][0] > 90) dragSamples.shift();
+        }
+      })
+    );
+    const endDrag = (e) => {
+      if (!dragging || (e && e.pointerId !== dragId)) return;
+      dragging = false;
+      if (dragMoved > 6) {
+        justDragged = true;
+        later(() => { justDragged = false; }, 60);
+        const now = performance.now();
+        const recent = dragSamples.filter((x) => now - x[0] < 90);
+        if (recent.length > 1) {
+          const dist = recent.reduce((a0, x) => a0 + x[1], 0);
+          const dt0 = Math.max(16, now - recent[0][0]) / 1000;
+          momentum = Math.max(-1800, Math.min(1800, -dist / dt0));
+        }
+      }
+      root.classList.remove("drag");
+    };
+    offs.push(listen(window, "pointerup", endDrag));
+    offs.push(listen(window, "pointercancel", endDrag));
+    offs.push(listen(rack, "pointerleave", () => { if (open < 0) { hov = -1; layout(); } }));
+    offs.push(listen(root, "pointerenter", () => { pointerIn = true; }));
+    offs.push(listen(root, "pointerleave", () => { pointerIn = false; }));
+    offs.push(listen(q("prev"), "click", () => step(-1)));
+    offs.push(listen(q("next"), "click", () => step(1)));
+    offs.push(listen(q("close"), "click", closeG));
+    offs.push(listen(q("hit"), "click", closeG));
+    // touch: swipe in the detail view to browse
+    let tx = 0;
+    offs.push(listen(root, "touchstart", (e) => { tx = e.touches[0].clientX; }));
+    offs.push(
+      listen(root, "touchend", (e) => {
+        if (open < 0) return;
+        const dx = (e.changedTouches[0] ? e.changedTouches[0].clientX : tx) - tx;
+        if (dx < -50) step(1);
+        else if (dx > 50) step(-1);
+      })
+    );
+    offs.push(
+      listen(window, "keydown", (e) => {
+        if (!pointerIn && open < 0) return;
+        if (open >= 0) {
+          if (e.key === "ArrowRight") step(1);
+          else if (e.key === "ArrowLeft") step(-1);
+          else if (e.key === "Escape") closeG();
+        } else if (e.key === "ArrowRight") { hov = Math.min(T - 1, hov + 1); layout(); }
+        else if (e.key === "ArrowLeft") { hov = hov < 0 ? T - 1 : Math.max(0, hov - 1); layout(); }
+        else if (e.key === "Enter" && hov >= 0) openG(hov);
+      })
+    );
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null;
+    if (ro) ro.observe(root);
+    offs.push(listen(window, "resize", fit));
+
+    // ── the rail's loop: it runs on its own, slows while a garment is faced and stands still while one is open ──
+    let raf = 0;
+    let last = performance.now();
+    const frame = (now) => {
+      raf = requestAnimationFrame(frame);
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      // full speed on its own, a slow crawl (20%) while a garment is faced, and still while one is open
+      const full = num(P().driftSpeed, 48);
+      const target = reduced || open >= 0 || dragging ? 0 : hov >= 0 ? full * 0.2 : full;
+      speed += (target - speed) * (1 - Math.exp(-dt * 6));
+      momentum *= Math.exp(-dt * 2.4);
+      if (Math.abs(momentum) < 1) momentum = 0;
+      if (!dragging && (Math.abs(speed) > 0.01 || momentum !== 0)) {
+        drift += (speed + momentum) * dt;
+        applyDrift();
+      }
+    };
+
+    writeStatic();
+    fit();
+    raf = requestAnimationFrame(frame);
+    apiRef.current.sync = () => {
+      if (builtKey !== `${spacing()}|${sz()}|${L.W}`) buildRack();
+      writeStatic();
+    };
+
     return () => {
-      host.removeEventListener("pointermove", onMove);
-      ro.disconnect();
-      scene.dispose();
-      sceneRef.current = null;
+      cancelAnimationFrame(raf);
+      timers.forEach(clearTimeout);
+      offs.forEach((f) => f());
+      if (ro) ro.disconnect();
+      root.innerHTML = "";
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Put the label where the pointer is the moment it appears.
+  // keep texts and sprite sheets in step with edited props (the engine owns the DOM)
   useEffect(() => {
-    placeRef.current?.();
-  }, [hoverIdx]);
-
-  // Push every prop change into the scene (cheap: nothing is rebuilt unless the
-  // picture list changed), and seat the bar at the hooks.
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    scene.updateConfig(cfgRef.current);
-    const S = scene.settings();
-    const y = scene.height / 2 - S.pageHeightPx / 2 + S.pageHeightPx * 0.022;
-    setRailY((prev) => (Math.abs(prev - y) < 0.5 ? prev : y));
-  });
-
-  /* ---- the caption under a held-up garment ---- */
-  const item = items.length ? items[panel.index % items.length] : null;
-  const number = panel.index >= 0 ? (items.length ? panel.index % items.length : panel.index) + 1 : 0;
-  const title = item?.title || (number ? `Item ${String(number).padStart(2, "0")}` : "");
-  const label = item?.buyLabel || buyLabel;
-  const showCaption = showDetails && tap && panel.index >= 0;
-  const reserve = captionReserve(box.h, showDetails && tap);
-
-  const press = () => {
-    if (!item) return;
-    live.current.onBuy?.(item, panel.index % Math.max(1, items.length));
-  };
-
-  const pill = {
-    display: "inline-block",
-    marginTop: 10,
-    padding: "13px 30px",
-    borderRadius: 999,
-    border: `1px solid ${captionColor}b3`,
-    background: "transparent",
-    color: captionColor,
-    fontFamily: SANS,
-    fontSize: 14,
-    fontWeight: 600,
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    textDecoration: "none",
-    cursor: "pointer",
-    pointerEvents: "auto",
-  };
+    if (apiRef.current.sync) apiRef.current.sync();
+  }, [garmentSize, spacing, brand, aboutLabel, contactLabel, products, marquee, availabilityLabel, closeLabel, frontSheet, sideSheet]);
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        height: "100%",
-        overflow: "hidden",
-        background,
-        "--cf-reserve": `${reserve}px`,
-        ...style,
-      }}
-    >
-      {/* the bar the hangers hang from: behind the garments, stepping back with them */}
-      {showRail && railY > -50 && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: railY - 5,
-            height: 10,
-            background: `linear-gradient(180deg, rgba(0,0,0,0.42) 0%, ${railColor} 34%, ${railColor} 56%, rgba(0,0,0,0.5) 100%), ${railColor}`,
-            boxShadow: "0 6px 14px rgba(0,0,0,0.45)",
-            opacity: panel.open ? 0.22 : 1,
-            transition: "opacity 600ms ease",
-            pointerEvents: "none",
-          }}
-        />
-      )}
-
-      <div
-        ref={hostRef}
-        role="img"
-        aria-label="A rail of clothing that drifts past; point at one to see it from the front and click it for its details"
-        style={{
-          position: "absolute",
-          inset: 0,
-          cursor: "grab",
-          // The rail is walked sideways, so a touch drag across it has to reach
-          // the pointer handlers. Vertical page scrolling still gets through.
-          touchAction: "pan-y",
-          userSelect: "none",
-          WebkitUserSelect: "none",
-        }}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }}
-        />
-      </div>
-
-      {hoverLabel && hoverEffect && tap && hoverIdx >= 0 && !panel.open && items.length > 0 && (
-        <div
-          ref={tipRef}
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            pointerEvents: "none",
-            zIndex: 5,
-            padding: "8px 12px",
-            borderRadius: 10,
-            background: "#FFFFFF",
-            color: "#111111",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-            fontFamily: SANS,
-            fontSize: 13,
-            lineHeight: 1.3,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {(() => {
-            const it = items[hoverIdx % items.length];
-            return (
-              <>
-                <div style={{ fontWeight: 600 }}>
-                  {it.title || `Item ${String((hoverIdx % items.length) + 1).padStart(2, "0")}`}
-                  {it.price ? <span style={{ fontWeight: 500, opacity: 0.6 }}> · {it.price}</span> : null}
-                </div>
-                <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>Click to view</div>
-              </>
-            );
-          })()}
-        </div>
-      )}
-
-      {showCaption && (
-        <div
-          role="dialog"
-          aria-label={title}
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            zIndex: 4,
-            color: captionColor,
-            opacity: panel.open ? 1 : 0,
-            transition: `opacity 300ms ease ${panel.open ? "260ms" : "0ms"}`,
-          }}
-        >
-          <Arrow dir={-1} color={captionColor} onClick={() => sceneRef.current?.browse(-1)} />
-          <Arrow dir={1} color={captionColor} onClick={() => sceneRef.current?.browse(1)} />
-
-          <button
-            type="button"
-            onClick={() => sceneRef.current?.close()}
-            aria-label="Close"
-            style={{
-              position: "absolute",
-              top: 12,
-              right: 12,
-              width: 34,
-              height: 34,
-              borderRadius: 999,
-              border: "none",
-              background: "rgba(127,127,127,0.18)",
-              color: "inherit",
-              fontSize: 15,
-              lineHeight: 1,
-              cursor: "pointer",
-              pointerEvents: "auto",
-            }}
-          >
-            ✕
-          </button>
-
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 16,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              textAlign: "center",
-              padding: "0 16px",
-            }}
-          >
-            <div style={{ fontFamily: SANS, fontSize: 12.5, letterSpacing: "0.14em", opacity: 0.55 }}>
-              {String(number).padStart(2, "0")} / {String(Math.max(1, items.length)).padStart(2, "0")}
-            </div>
-            <div
-              style={{
-                marginTop: 6,
-                fontFamily: SERIF,
-                fontStyle: "italic",
-                fontWeight: 400,
-                fontSize: "clamp(26px, 4.4vw, 38px)",
-                lineHeight: 1.1,
-              }}
-            >
-              {title}
-            </div>
-            {item?.price ? (
-              <div style={{ marginTop: 6, fontFamily: SANS, fontSize: 16, letterSpacing: "0.08em", opacity: 0.62 }}>
-                {item.price}
-              </div>
-            ) : null}
-            {item?.buyUrl ? (
-              <a href={item.buyUrl} target="_blank" rel="noopener noreferrer" onClick={press} style={pill}>
-                {label}
-              </a>
-            ) : (
-              <button type="button" onClick={press} style={pill}>
-                {label}
-              </button>
-            )}
-            {box.w >= 560 && (
-              <div style={{ marginTop: 12, fontFamily: SANS, fontSize: 11.5, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.42 }}>
-                ← → Browse · Esc close
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    <>
+      <style>{CSS}</style>
+      <div ref={rootRef} className="of" style={{ "--bg": background, "--ink": textColor, "--mute": mutedColor, "--red": bandColor, ...style }} />
+    </>
   );
 }

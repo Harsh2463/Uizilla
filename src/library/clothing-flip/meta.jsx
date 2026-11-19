@@ -1,5 +1,8 @@
-import ClothingFlip, { DEFAULT_PRODUCTS } from "./ClothingFlip.jsx";
+import ClothingFlip from "./ClothingFlip.jsx";
 import source from "./ClothingFlip.jsx?raw";
+
+const FRONT = "https://ik.imagekit.io/Harsh2463/jackets/Hoodie%20Color%20Grid%20Collection.png?tr=f-webp,q-90";
+const SIDE = "https://ik.imagekit.io/Harsh2463/jackets/Hoodie%20Sprite%20Sheet%20Collection%20side%20view.png?tr=f-webp,q-90";
 
 export default {
   slug: "clothing-flip",
@@ -9,89 +12,69 @@ export default {
   source,
   Component: ClothingFlip,
   description:
-    "Magazine Flip for clothes: garments hang edge-on from a bar and drift left on a loop. Point at one and it turns to face you; click it for a full view with arrows, price and a button.",
-  // The demo on the component page leaves the page scrollable; the editor and
-  // the component's own default capture the wheel.
-  render: () => <ClothingFlip scrollLock={false} />,
+    "Offcut, a dark streetwear clothing-rail hero: a blackletter logo, a polished chrome rail and twelve hoodies hanging on it in profile. Point at one and it swings round to face you while its neighbours part, with its name and price in rupees underneath. Click it and it lifts off the rail into a large centred view with a counter, an italic serif name, the price, previous / next arrows and a Close button, while the rest of the page washes out. A red marquee runs along the bottom. The rail keeps drifting in a loop, and phones and tablets in portrait get their own taller layout.",
+  // Rendered on the home page card and on the component page.
+  render: () => <ClothingFlip />,
   usage: `import ClothingFlip from "./ClothingFlip";
 
-const products = [
-  {
-    src: "/images/hoodie.png",   // ONE picture of the garment on its hanger (a transparent cut-out works best)
-    title: "Believe in Yourself Hoodie",
-    price: "$98",
-    buyUrl: "https://your-shop.com/hoodie",
-  },
-  // ...
-];
-
-// The rail fills its parent, so give the parent a height.
-<div style={{ height: 640 }}>
+// One fixed 1500 x 1000 composition that scales to fit its parent, so give the parent a height.
+<div style={{ height: 720 }}>
   <ClothingFlip
-    images={products}
-    onBuy={(product, index) => addToCart(product)}
+    brand="Offcut"
+    products={["Black Hoodie | ₹2,499", "Bone Hoodie | ₹2,499" /* ...12 in sheet order */]}
   />
-</div>`,
+</div>
+
+// Needs, at runtime: Inter, Instrument Serif and UnifrakturMaguntia (Google Fonts) and your two sprite sheets (URLs).`,
   // Editor sidebar. `default` must match the default in ClothingFlip.jsx.
   controls: [
+    { key: "brand", label: "Logo Text", type: "text", default: "Offcut" },
     {
-      key: "images", label: "Products", type: "images", noun: "Products",
-      default: DEFAULT_PRODUCTS,
-      fields: [
-        { key: "title", label: "Title" },
-        { key: "price", label: "Price" },
-        { key: "buyUrl", label: "Button link (opens in a new tab)" },
+      key: "products", label: "Products (Name | Price), in sheet order", type: "words", noun: "products",
+      default: [
+        "Believe in Yourself Hoodie — Black | ₹2,499",
+        "Believe in Yourself Hoodie — Bone | ₹2,499",
+        "Believe in Yourself Hoodie — Heather Grey | ₹2,499",
+        "Believe in Yourself Hoodie — Navy | ₹2,499",
+        "Believe in Yourself Hoodie — Maroon | ₹2,599",
+        "Believe in Yourself Hoodie — Forest Green | ₹2,599",
+        "Believe in Yourself Hoodie — Royal Blue | ₹2,599",
+        "Believe in Yourself Hoodie — Purple | ₹2,599",
+        "Believe in Yourself Hoodie — Mustard | ₹2,699",
+        "Believe in Yourself Hoodie — Rust | ₹2,699",
+        "Believe in Yourself Hoodie — Pink | ₹2,699",
+        "Believe in Yourself Hoodie — Sky Blue | ₹2,699",
       ],
     },
-    { key: "pages", label: "Hangers (min.)", type: "number", min: 4, max: 60, step: 1, default: 10 },
-    { key: "spacing", label: "Spacing", type: "number", min: 0, max: 10, step: 0.1, default: 5 },
-    { key: "garmentWidth", label: "Garment Width", unit: "px", type: "number", min: 100, max: 800, step: 1, default: 300 },
-    { key: "garmentHeight", label: "Garment Height", unit: "px", type: "number", min: 100, max: 800, step: 1, default: 360 },
-    { key: "sideTurn", label: "Side Turn", type: "number", min: 0, max: 10, step: 0.1, default: 8 },
-    { key: "showRail", label: "Show Rail", type: "toggle", default: true },
-    { key: "railColor", label: "Rail Color", type: "color", default: "#C9CBD1" },
-    { key: "tap", label: "Click to Open", type: "toggle", default: true },
-    { key: "showDetails", label: "Caption and Arrows", type: "toggle", default: true },
-    { key: "imageProxy", label: "Image Proxy", type: "text", default: "https://images.weserv.nl/?url={url}" },
-    { key: "hoverEffect", label: "Hover Front View", type: "toggle", default: true },
-    { key: "hoverLabel", label: "Hover Label", type: "toggle", default: true },
-    { key: "zoom", label: "Zoom", type: "number", min: 0, max: 10, step: 0.1, default: 5 },
-    { key: "openSpeed", label: "Open Speed", type: "number", min: 0, max: 10, step: 0.1, default: 5 },
-    { key: "drift", label: "Drift", type: "number", min: -10, max: 10, step: 0.1, default: 1.5 },
-    { key: "smoothing", label: "Smoothing", type: "number", min: 0, max: 10, step: 0.1, default: 5 },
-    { key: "sway", label: "Sway", type: "number", min: 0, max: 10, step: 0.1, default: 5 },
-    { key: "scrollSens", label: "Scroll Sens.", type: "number", min: 0, max: 10, step: 0.1, default: 5 },
-    { key: "scrollLock", label: "Scroll Lock", type: "toggle", default: true },
-    { key: "buyLabel", label: "Button Label", type: "text", default: "See availability" },
-    { key: "captionColor", label: "Caption Color", type: "color", default: "#F4F4F5" },
-    { key: "background", label: "Background", type: "color", default: "#0E0E10" },
+    { key: "marquee", label: "Marquee Band Text (repeats)", type: "words", noun: "items", default: ["OFFCUT", "•", "LIMITED RUN", "•", "NO RESTOCKS", "•"] },
+    { key: "garmentSize", label: "Hoodie Size (spacing adjusts with it)", unit: "%", type: "number", min: 50, max: 160, step: 1, default: 100 },
+    { key: "spacing", label: "Spacing Between Hoodies", type: "number", min: 60, max: 500, step: 1, default: 150 },
+    { key: "driftSpeed", label: "Rail Speed (loops on its own)", type: "number", min: -200, max: 200, step: 1, default: 48 },
+    { key: "aboutLabel", label: "Top-Left Label", type: "text", default: "About" },
+    { key: "contactLabel", label: "Top-Right Label", type: "text", default: "Contact" },
+    { key: "availabilityLabel", label: "Pill Button Text", type: "text", default: "See availability" },
+    { key: "closeLabel", label: "Close Button Text", type: "text", default: "Close" },
+    { key: "background", label: "Background", type: "color", default: "#0b0b0c" },
+    { key: "textColor", label: "Text Colour", type: "color", default: "#f1efec" },
+    { key: "mutedColor", label: "Secondary Text Colour", type: "color", default: "#8d8a86" },
+    { key: "bandColor", label: "Marquee Band Colour", type: "color", default: "#b3121b" },
+    { key: "frontSheet", label: "Front-View Sprite Sheet URL (WebP)", type: "text", default: FRONT },
+    { key: "sideSheet", label: "Side-View Sprite Sheet URL (WebP)", type: "text", default: SIDE },
   ],
   props: [
-    ["images", "Product[]", "10 sample products", "Each product: { src, title?, price?, buyUrl?, buyLabel? }. A bare URL string also works. One picture per product: the edge-on view is that picture turned on its edge. A transparent cut-out with the hook at the top works best; an entry whose picture fails to load shows a numbered stand-in."],
-    ["pages", "number", "10", "The least number of hangers on the rail, 4–60. A wide frame gets more automatically so the seam never shows, and fewer products than hangers simply repeat."],
-    ["spacing", "number", "5", "Gap between hangers along the bar, 0–10."],
-    ["garmentWidth", "number", "300", "Width in px of a garment facing you, at full size. Garments shrink on small frames."],
-    ["garmentHeight", "number", "360", "Height in px of every garment, the same edge-on and facing you."],
-    ["sideTurn", "number", "8", "How far garments are turned away on the rail. 10 is nearly edge-on, 0 leaves them facing you."],
-    ["showRail", "boolean", "true", "Draw the bar the hangers hang from."],
-    ["railColor", "string", '"#C9CBD1"', "Colour of the bar."],
-    ["tap", "boolean", "true", "Clicking a garment lifts it to the middle. Esc, ✕, or a click anywhere puts it back."],
-    ["showDetails", "boolean", "true", "Show the counter, title, price, button and browse arrows under a held-up garment."],
-    ["imageProxy", "string", '"https://images.weserv.nl/?url={url}"', "Used only when a picture's own host blocks it: the URL is retried through this proxy, with {url} replaced by the encoded address. Set to \"\" to switch it off."],
-    ["hoverEffect", "boolean", "true", "The garment under the pointer turns to face you and its neighbours part to make room."],
-    ["hoverLabel", "boolean", "true", "Show a small label (title, price, \"Click to view\") next to the pointer over a garment."],
-    ["zoom", "number", "5", "How much of the frame a held-up garment fills."],
-    ["openSpeed", "number", "5", "How fast a garment travels to the middle and back."],
-    ["drift", "number", "1.5", "How fast the rail travels left on its own. Negative goes right; 0 stops it. It holds still while the pointer is on a garment."],
-    ["smoothing", "number", "5", "How much weight the rail carries after the input stops."],
-    ["sway", "number", "5", "How much the garments swing on their hangers as the rail moves."],
-    ["scrollSens", "number", "5", "How far one notch of wheel moves the rail."],
-    ["scrollLock", "boolean", "true", "Consume the wheel over the component so the page does not scroll past it."],
-    ["buyLabel", "string", '"See availability"', "Text of the button. A product's own buyLabel wins."],
-    ["captionColor", "string", '"#F4F4F5"', "Colour of the caption text, arrows and button outline."],
-    ["onBuy", "(product, index) => void", "undefined", "Called when the button is pressed, e.g. to add to a cart. buyUrl, if set, also opens."],
-    ["onOpen / onClose", "(product, index) => void / () => void", "undefined", "Called as a product opens (and as you browse to the next) and as it closes."],
-    ["background", "string", '"#0E0E10"', "Background colour behind the rail."],
-    ["style", "CSSProperties", "undefined", "Extra styles for the outer wrapper."],
+    ["brand", "string", '"Offcut"', "The blackletter logo at the top centre."],
+    ["products", "string[]", "12 hoodies", 'One line per garment in sprite-sheet order (left to right, top to bottom): "Name | Price". Prices are plain text, so "₹2,499" shows as typed. The sheets hold twelve garments.'],
+    ["marquee", "string[]", '["OFFCUT", "•", "LIMITED RUN", "•", "NO RESTOCKS", "•"]', "The items of the red band along the bottom, repeated 16 times and scrolling left."],
+    ["drag", "—", "built in", "Drag the trail sideways (mouse or finger) to slide it. Only the band the hoodies hang in is draggable, not the rest of the section and see the other hoodies; let go and it keeps gliding for a moment, then returns to its own loop. A drag never opens a hoodie by accident; a plain click or tap still does."],
+    ["garmentSize", "number", "100", "Size of the hoodies on the rail, in percent (50–160). The spacing and the gap that opens around a faced hoodie scale with it, so the proportions stay the same; the rail, caption and pill make room for bigger hoodies."],
+    ["spacing", "number", "150", "Distance between neighbouring hoodies on the rail, in artboard px (60–500). The rail loops, so not every hoodie has to be on screen at once: a larger gap shows fewer at a time, a smaller one more (the hoodies repeat to fill a wide rail). Hoodies enter and leave beyond the edge of the section, so they never pop in or out."],
+    ["driftSpeed", "number", "48", "How fast the garments travel along the rail, in artboard px per second. They loop forever (leaving at one end and returning at the other). The rail slows to a crawl (20% of this speed) while a garment is faced and stands still while one is open. Negative runs the other way; 0 stops it. Reduced-motion visitors get a still rail."],
+    ["aboutLabel / contactLabel", "string", '"About" / "Contact"', "The two labels in the top corners (decorative; Contact is replaced by Close while a garment is open)."],
+    ["availabilityLabel / closeLabel", "string", '"See availability" / "Close"', "The pill button text (under the faced garment and in the detail view) and the close button text."],
+    ["background / textColor / mutedColor / bandColor", "string", '"#0b0b0c" / "#f1efec" / "#8d8a86" / "#b3121b"', "The page, main text, secondary text (prices, counter) and the marquee band."],
+    ["frontSheet / sideSheet", "string", "the two hoodie sheets", "Two transparent sprite sheets of twelve garments hanging from hooks, 4 columns x 3 rows: a front-view sheet (shown when a garment faces you and in the detail view) and a side-view sheet (shown on the rail). They are served as WebP through ImageKit (?tr=f-webp). A replacement sheet should be laid out the same way and be about 1450 x 1085 px."],
+    ["style", "CSSProperties", "{}", "Extra styles for the outer wrapper."],
+    ["— Dependencies —", "runtime", "—", "React 18 (npm). Loaded at runtime: Inter, Instrument Serif (italic) and UnifrakturMaguntia from Google Fonts, and the two sprite sheets. No other libraries."],
+    ["— How it is used —", "—", "—", "Drag the rail sideways to slide it. Point at a garment on the rail to swing it to face you; the ones to its left and right slide apart. Arrow keys move the faced garment and Enter opens it (while the pointer is over the section). On phones and portrait tablets the composition switches to a tall layout with bigger type; tap a garment to face it, tap it again to open it, and swipe left or right in the detail view to browse. Click a garment to lift it into the detail view; use the arrows or the left and right keys to browse, and Close, Escape or a click on the empty space to put it back."],
   ],
 };
